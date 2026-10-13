@@ -3,12 +3,28 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class LinkedInProfile(BaseModel):
+    """Public OIDC profile only; never credentials or arbitrary provider claims."""
+
+    model_config = ConfigDict(extra="forbid")
+    sub: str
+    issuer: str
+    name: str | None = None
+    given_name: str | None = None
+    family_name: str | None = None
+    picture: str | None = None
+    locale: str | None = None
+    email: str | None = None
+    email_verified: bool | None = None
+
+
 class User(BaseModel):
     sub: str
     name: str
     email: str
     role: Literal["candidate", "hr"]
     issuer: str
+    linkedin_profile: LinkedInProfile | None = None
 
 
 class Job(BaseModel):

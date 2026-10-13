@@ -40,6 +40,8 @@ The field names in this mapping example are illustrative. The implementation has
 
 An empty request-field mapping value omits that optional field, for example `{"submit_application":{"consent_accepted":""}}`. Use this only to align a verified existing contract; essential ownership, consent, stable-ID, and idempotency behavior must still exist in the complete integration design.
 
+The optional profile snapshot maps canonical `linkedin_profile` to the proposed `LinkedInProfileJson` memo field. If an existing X++ request contract has not yet been extended, temporarily omit it with `D365_REQUEST_FIELD_MAPS={"submit_application":{"linkedin_profile":""}}` (merge this entry with any existing mappings). Contact submission still works, but the provider profile snapshot is not persisted in D365 until the field and contract are deployed and that omission is removed. A field-name override can target an equivalent existing memo field. The portal does not create X++ fields itself.
+
 Start by obtaining sanitized example requests/responses and exact X++ signatures for each operation. Keep the canonical frontend/API model unchanged while adjusting the adapter's aliases or configuration. Unknown optional fields must not be turned into invented facts; missing required identifiers, invalid JSON collections, and contradictory records are contract errors.
 
 ## 1. `getOpenRequirements` — existing
@@ -94,6 +96,7 @@ Proposed canonical request, with `_request` configurable:
     "RequirementId": "REQ-0001",
     "LinkedInIssuer": "https://www.linkedin.com/oauth",
     "LinkedInSub": "verified-oidc-subject",
+    "LinkedInProfileJson": "{\"sub\":\"verified-oidc-subject\",\"issuer\":\"https://www.linkedin.com/oauth\",\"name\":\"Alex Example\",\"given_name\":\"Alex\",\"family_name\":\"Example\",\"email\":\"alex@example.com\",\"email_verified\":true}",
     "FullName": "Alex Example",
     "Email": "alex@example.com",
     "Phone": "",
@@ -111,6 +114,8 @@ Proposed canonical request, with `_request` configurable:
 
 Identity comes from the validated backend session, never trusted form identity fields. The private storage reference is metadata; no document Base64 is sent. `IdempotencyKey` is a proposed integration requirement that must be supported or mapped to an existing D365 request reference.
 
+`FullName`, `Email`, `Phone`, and `LinkedInUrl` are the contact details the candidate confirmed for this application. `LinkedInProfileJson` is separate provider metadata: it contains the validated subject/issuer plus only available allowlisted name, given/family name, valid email, email-verification, HTTPS picture, and locale fields. Its nested keys retain OIDC snake_case names. It is omitted if no LinkedIn profile snapshot exists. The authenticated subject also stays in `LinkedInSub`; never infer a public profile URL or use a member URN as an email. Access/ID/refresh tokens and raw OAuth responses must not be stored in candidate/application tables.
+
 Persist and return the backend-created `ResumeBlobKey` **unchanged**, including its `azure:` prefix. The storage adapter accepts `azure:<32 lowercase hex>.pdf/.docx` and demo `local:<32 lowercase hex>.pdf/.docx` references. A standalone blob path, public URL, or browser-provided reference is not interchangeable with that format.
 
 Expected success shape:
@@ -124,6 +129,8 @@ Expected success shape:
 ```
 
 Return a stable, non-empty `ApplicationId` belonging to the submitted candidate/requirement. Without it the backend cannot reliably queue or persist evaluations and returns a contract error rather than inventing an identifier. D365 must atomically reuse the same application for a retried idempotency key. Its candidate upsert should match issuer/subject, preserve company boundaries, validate the open requirement, and create the application in one transaction.
+
+Before acknowledging success, that transaction must save the candidate's basic contact information and optional provider-profile snapshot to the candidate master, then create the linked application with its confirmed contact snapshot, consent, and document reference. Only after acknowledgement does the backend queue resume/JD comparison. The AI result is saved through the separate `saveCandidateEvaluation` operation below; sign-in and profile prefill do not trigger either application submission or AI processing.
 
 ## 3. `saveCandidateEvaluation` — pending
 

@@ -1,8 +1,14 @@
-import type {AuthSession, Candidate, CandidateResponse, Evaluation, Job, User} from '../lib/types';
+import type {AuthSession, Candidate, CandidateResponse, Evaluation, Job, LinkedInProfile, User} from '../lib/types';
 
 // All people, employers, requirements, and scores here are fictional test fixtures.
 export const candidateUser: User = {sub: 'test-candidate', name: 'Alex Sample', email: 'alex@example.test', role: 'candidate', issuer: 'test'};
 export const hrUser: User = {sub: 'test-reviewer', name: 'Taylor Reviewer', email: 'taylor@example.test', role: 'hr', issuer: 'test'};
+export const linkedinProfile: LinkedInProfile = {
+  sub: 'urn:li:member:test-15030', issuer: 'https://www.linkedin.com/oauth',
+  name: 'Alex Sample', given_name: 'Alex', family_name: 'Sample',
+  email: 'alex@example.test', email_verified: true, locale: 'en-US',
+  picture: 'https://media.licdn.com/dms/image/test-avatar',
+};
 export function session(user: User | null = candidateUser): AuthSession {return {user, csrf_token: 'test-csrf-token', demo_mode: true};}
 
 export const engineeringJob: Job = {

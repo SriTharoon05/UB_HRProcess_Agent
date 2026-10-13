@@ -2445,6 +2445,91 @@ select {
 .application-form {
   padding: 28px;
 }
+.linkedin-profile-summary {
+  min-width: 0;
+  margin-bottom: 26px;
+  padding: 18px;
+  border: 1px solid #e9e2fa;
+  border-radius: 12px;
+  background: #faf8ff;
+}
+.linkedin-profile-heading {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.linkedin-profile-heading > svg {
+  color: var(--purple);
+}
+.linkedin-profile-heading > div {
+  min-width: 0;
+}
+.linkedin-profile-heading h2,
+.linkedin-profile-heading h3 {
+  font-size: 14px;
+  letter-spacing: -0.3px;
+  color: #393346;
+}
+.linkedin-profile-heading .linkedin-profile-copy {
+  margin-top: 4px;
+}
+.linkedin-profile-photo {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #eee8fa;
+}
+.linkedin-profile-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  margin: 16px 0 0;
+}
+.linkedin-profile-fields > div {
+  min-width: 0;
+}
+.linkedin-profile-fields dt {
+  color: #75687f;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.linkedin-profile-fields dd {
+  margin: 3px 0 0;
+  color: #4a3e5c;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.linkedin-profile-copy {
+  margin-top: 10px;
+  color: #75687f;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.linkedin-profile-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #ece6f6;
+  color: #75687f;
+  font-size: 11px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.linkedin-profile-account code {
+  min-width: 0;
+  max-width: 100%;
+  color: #5a4b67;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
 .form-section-title {
   display: flex;
   align-items: center;
@@ -5037,6 +5122,14 @@ select {
   }
   .application-form {
     padding: 23px;
+  }
+  .linkedin-profile-summary {
+    padding: 16px;
+    margin-bottom: 23px;
+  }
+  .linkedin-profile-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
   }
   .form-section-title {
     gap: 11px;

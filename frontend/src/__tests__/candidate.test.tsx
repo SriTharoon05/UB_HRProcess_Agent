@@ -5,7 +5,7 @@ import {api} from '../lib/api';
 import type {AuthSession, Job, SubmissionResult} from '../lib/types';
 import {AppShell} from '../components/app-shell';
 import {ApplicationDetailPage, ApplicationsPage, ApplyPage, JobDetailsPage, JobsPage} from '../pages/candidate';
-import {candidateUser, engineeringJob, highCandidate, jobs, pendingCandidate, session} from './fixtures';
+import {candidateUser, engineeringJob, highCandidate, jobs, linkedinProfile, pendingCandidate, session} from './fixtures';
 import {deferred, mockApi, renderPage} from './helpers';
 
 beforeEach(mockApi);
@@ -65,6 +65,14 @@ describe('public opportunities', () => {
     expect(screen.getByText('Accessibility')).toBeVisible();
     expect(screen.getByRole('link', {name: 'Apply now'})).toHaveAttribute('href', `/jobs/${engineeringJob.requirement_id}/apply`);
   });
+
+  it('sends an anonymous candidate directly through LinkedIn back to the selected role application', async () => {
+    vi.mocked(api.session).mockResolvedValue(session(null));
+    renderPage(<JobDetailsPage />, {path: '/jobs/' + engineeringJob.requirement_id, route: '/jobs/:requirementId'});
+    const link = await screen.findByRole('link', {name: 'Sign in with LinkedIn to apply'});
+    expect(link).toHaveAttribute('href', '/auth/linkedin/login?return_to=' + encodeURIComponent('/jobs/' + engineeringJob.requirement_id + '/apply'));
+    expect(screen.getByText('Return to this role’s application after sign-in.')).toBeVisible();
+  });
 });
 
 function renderApply() {
@@ -80,6 +88,68 @@ async function attachResume() {
 }
 
 describe('candidate application submission', () => {
+  it('displays the standard LinkedIn profile separately from editable application contacts', async () => {
+    vi.mocked(api.session).mockResolvedValue(session({...candidateUser, linkedin_profile: linkedinProfile}));
+    renderApply(); await readyForm();
+    const profile = screen.getByRole('region', {name: 'Connected with LinkedIn'});
+    expect(within(profile).getByText('Alex Sample')).toBeVisible();
+    expect(within(profile).getByText('Alex')).toBeVisible();
+    expect(within(profile).getByText('Sample')).toBeVisible();
+    expect(within(profile).getByText('alex@example.test')).toBeVisible();
+    expect(within(profile).getByText('Verified by LinkedIn')).toBeVisible();
+    expect(within(profile).getByText('en-US')).toBeVisible();
+    expect(within(profile).getByText(linkedinProfile.sub)).toBeVisible();
+    expect(within(profile).queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', {name: 'LinkedIn profile photo'})).toHaveAttribute('src', linkedinProfile.picture);
+    expect(screen.getByRole('img', {name: 'LinkedIn profile photo'})).toHaveAttribute('referrerpolicy', 'no-referrer');
+    await userEvent.clear(screen.getByRole('textbox', {name: 'Email address'}));
+    await userEvent.type(screen.getByRole('textbox', {name: 'Email address'}), 'contact@example.test');
+    expect(within(profile).getByText('alex@example.test')).toBeVisible();
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('contact@example.test');
+  });
+
+  it('keeps a legacy LinkedIn account URN out of the contact email field', async () => {
+    vi.mocked(api.session).mockResolvedValue(session({
+      ...candidateUser, email: linkedinProfile.sub,
+      linkedin_profile: {...linkedinProfile, email: null, email_verified: null},
+    }));
+    renderApply(); await readyForm();
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('');
+    expect(screen.getByText(linkedinProfile.sub)).toBeVisible();
+    expect(screen.getByText(/LinkedIn did not provide a contact email/)).toBeVisible();
+    expect(screen.getByRole('textbox', {name: /LinkedIn profile/})).toHaveValue('');
+  });
+
+  it('shows a compact connected account when LinkedIn shares only its identifier', async () => {
+    vi.mocked(api.session).mockResolvedValue(session({...candidateUser, name: '', email: '', linkedin_profile: {sub: 'linked-account-only', issuer: linkedinProfile.issuer}}));
+    renderApply();
+    await screen.findByRole('heading', {name: 'Make your next move.'});
+    const profile = screen.getByRole('region', {name: 'Connected with LinkedIn'});
+    expect(within(profile).getByText('linked-account-only')).toBeVisible();
+    expect(within(profile).queryByText('Full name')).not.toBeInTheDocument();
+    expect(within(profile).queryByRole('img')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', {name: 'Full name'})).toHaveValue('');
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('');
+  });
+
+  it.each([
+    'http://media.licdn.com/photo',
+    'javascript:alert(1)',
+    'https://media.licdn.com@external.example/photo',
+    'https://media.licdn.com:8443/photo',
+    'https://external.example/photo',
+  ])('does not render an untrusted profile photo URL: %s', async (picture) => {
+    vi.mocked(api.session).mockResolvedValue(session({...candidateUser, linkedin_profile: {...linkedinProfile, picture}}));
+    renderApply(); await readyForm();
+    expect(screen.queryByRole('img', {name: 'LinkedIn profile photo'})).not.toBeInTheDocument();
+  });
+
+  it('prefills valid profile contacts when flat session contact fields are missing', async () => {
+    vi.mocked(api.session).mockResolvedValue(session({...candidateUser, name: '', email: '', linkedin_profile: {...linkedinProfile, name: null}}));
+    renderApply(); await readyForm();
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('alex@example.test');
+  });
+
   it('prefills editable application contact details and blocks submission without informed consent', async () => {
     renderApply(); await readyForm(); await attachResume();
     expect(screen.getByRole('textbox', {name: 'Full name'})).not.toHaveAttribute('readonly');

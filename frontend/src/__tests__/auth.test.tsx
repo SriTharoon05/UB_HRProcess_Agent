@@ -4,6 +4,8 @@ import {Route, useLocation} from 'react-router-dom';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {api} from '../lib/api';
 import {Protected} from '../lib/auth';
+import {returnPath, signInHref} from '../lib/sign-in';
+import {AppShell} from '../components/app-shell';
 import type {AuthSession} from '../lib/types';
 import {LoginPage} from '../pages/candidate';
 import {HRDashboardPage} from '../pages/hr';
@@ -28,6 +30,29 @@ describe('authentication and role boundaries', () => {
     expect(await screen.findByText('/hr/login · requested /hr')).toBeVisible();
     expect(api.jobs).not.toHaveBeenCalled();
     expect(api.candidates).not.toHaveBeenCalled();
+  });
+
+  it('carries the complete selected application URL into the external LinkedIn sign-in', async () => {
+    vi.mocked(api.session).mockResolvedValue(session(null));
+    const target = '/jobs/TEST-ENG-001/apply?source=job-post#contact';
+    renderRoutes(<><Route path="/jobs/:id/apply" element={<Protected role="candidate"><p>Private application form</p></Protected>} /><Route path="/login" element={<LoginPage />} /></>, target);
+    expect(await screen.findByRole('link', {name: 'Continue with LinkedIn'})).toHaveAttribute('href', '/auth/linkedin/login?return_to=' + encodeURIComponent(target));
+  });
+
+  it('keeps the current JD as the destination when using the global sign-in button', async () => {
+    vi.mocked(api.session).mockResolvedValue(session(null));
+    const target = '/jobs/TEST-ENG-001?source=campaign#requirements';
+    renderRoutes(<Route element={<AppShell />}><Route path="/jobs/:id" element={<p>Selected job description</p>} /><Route path="/login" element={<LoginPage />} /></Route>, target);
+    await userEvent.click(await screen.findByRole('link', {name: 'Sign in'}));
+    expect(screen.getByRole('link', {name: 'Continue with LinkedIn'})).toHaveAttribute('href', '/auth/linkedin/login?return_to=' + encodeURIComponent(target));
+  });
+
+  it('returns demo sign-in to the selected application instead of the application list', async () => {
+    vi.mocked(api.session).mockResolvedValue(session(null));
+    vi.spyOn(api, 'demoLogin').mockResolvedValue(session(candidateUser));
+    renderRoutes(<><Route path="/jobs/:id/apply" element={<Protected role="candidate"><p>Selected role application form</p></Protected>} /><Route path="/login" element={<LoginPage />} /></>, '/jobs/TEST-ENG-001/apply');
+    await userEvent.click(await screen.findByRole('button', {name: 'Explore candidate demo'}));
+    expect(await screen.findByText('Selected role application form')).toBeVisible();
   });
 
   it('does not admit an HR session to candidate-only application pages', async () => {
@@ -74,5 +99,25 @@ describe('authentication and role boundaries', () => {
     expect(screen.getByRole('link', {name: 'Continue with LinkedIn'})).toHaveAttribute('href', '/auth/linkedin/login');
     await waitFor(() => expect(screen.queryByText('Checking workspace…')).not.toBeInTheDocument());
     expect(screen.queryByRole('button', {name: 'Explore candidate demo'})).not.toBeInTheDocument();
+  });
+});
+
+describe('sign-in destinations', () => {
+  it.each([
+    'https://external.example/jobs/TEST/apply',
+    '//external.example/jobs/TEST/apply',
+    '/jobs/TEST\\external',
+    '/jobs/%2e%2e/hr',
+    '/jobs/../hr',
+    '/login',
+    '/hr/jobs',
+  ])('does not send an unsafe or unrelated candidate destination: %s', (target) => {
+    expect(returnPath(target)).toBeNull();
+    expect(signInHref(false, target)).toBe('/auth/linkedin/login');
+  });
+
+  it('preserves an encoded requirement identifier and supports protected HR destinations', () => {
+    expect(returnPath('/jobs/REQ%20ENG/apply?source=post#contact')).toBe('/jobs/REQ%20ENG/apply?source=post#contact');
+    expect(signInHref(true, '/hr/jobs/TEST/candidates/APP')).toBe('/auth/hr/login?return_to=%2Fhr%2Fjobs%2FTEST%2Fcandidates%2FAPP');
   });
 });

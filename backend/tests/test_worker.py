@@ -12,7 +12,7 @@ from app.auth import SessionStore
 from app.config import Settings
 from app.demo import DemoAdapter, sample_evaluation
 from app.errors import ConfigurationError, IntegrationError
-from app.models import User
+from app.models import LinkedInProfile, User
 from app.queue import SubmissionCoordinator, submission_fingerprint
 from app.retry_evaluation import retry
 from app.worker import evaluate_application
@@ -25,7 +25,7 @@ async def durable_context(tmp_path):
         pytest.skip("Set REDIS_TEST_URL for isolated live Redis durability tests")
     redis = await create_pool(RedisSettings.from_dsn(redis_url))
     prefix = "backend-test-" + uuid.uuid4().hex
-    settings = Settings(_env_file=None, redis_url=redis_url, redis_prefix=prefix, local_resume_dir=tmp_path)
+    settings = Settings(_env_file=None, demo_mode=False, redis_url=redis_url, redis_prefix=prefix, local_resume_dir=tmp_path)
     adapter = Mock()
     adapter.submit_application = AsyncMock(return_value={"application_id": prefix + "-application"})
     adapter.save_candidate_evaluation = AsyncMock(return_value={"success": True})
@@ -114,9 +114,113 @@ async def test_provider_failure_preserves_ready_outbox_without_duplicate_storage
         await submit(ctx)
     key = ctx["coordinator"].key(ctx["user"], "idempotency-001")
     assert (await ctx["coordinator"].load(key))["stage"] == "ready"
+    assert not await ctx["redis"].exists("arq:job:evaluation:" + ctx["settings"].redis_prefix + "-application")
+    ctx["ai"].evaluate.assert_not_awaited()
+    ctx["adapter"].save_candidate_evaluation.assert_not_awaited()
     await ctx["coordinator"].reconcile()
     assert (await ctx["coordinator"].load(key))["stage"] == "queued"
     ctx["resumes"].store.assert_awaited_once()
+
+
+async def test_confirmed_contact_and_provider_profile_save_before_queued_separate_evaluation(durable_context, monkeypatch):
+    ctx = durable_context
+    profile = LinkedInProfile(
+        sub=ctx["user"].sub,
+        issuer=ctx["user"].issuer,
+        name="LinkedIn Applicant",
+        given_name="LinkedIn",
+        family_name="Applicant",
+        email="provider@example.test",
+        email_verified=False,
+        picture="https://media.example.test/profile.png",
+        locale="en_IN",
+    )
+    ctx["user"] = ctx["user"].model_copy(update={
+        "name": "Confirmed Applicant", "email": "confirmed@example.test", "linkedin_profile": profile,
+    })
+    stages = []
+    application_id = ctx["settings"].redis_prefix + "-application"
+
+    async def application_saved(payload):
+        ctx["ai"].evaluate.assert_not_awaited()
+        ctx["adapter"].save_candidate_evaluation.assert_not_awaited()
+        assert not await ctx["redis"].exists("arq:job:evaluation:" + application_id)
+        stages.append("candidate_and_application_saved")
+        return {"application_id": application_id}
+
+    native_enqueue = ctx["redis"].enqueue_job
+
+    async def enqueue(*args, **kwargs):
+        key = ctx["coordinator"].key(ctx["user"], "idempotency-001")
+        record = await ctx["coordinator"].load(key)
+        assert record["stage"] == "accepted" and record["application_id"] == application_id
+        assert stages == ["candidate_and_application_saved"]
+        stages.append("evaluation_queued")
+        return await native_enqueue(*args, **kwargs)
+
+    queued = AsyncMock(side_effect=enqueue)
+    monkeypatch.setattr(ctx["redis"], "enqueue_job", queued)
+    ctx["adapter"].submit_application.side_effect = application_saved
+    result = await ctx["coordinator"].submit(
+        ctx["user"],
+        "idempotency-001",
+        submission_fingerprint(
+            ctx["job"].requirement_id, b"valid-resume", "+91 555 0100", "https://www.linkedin.com/in/applicant", "v1",
+            candidate_name=ctx["user"].name, email=ctx["user"].email,
+        ),
+        ctx["job"], b"valid-resume", "resume.pdf", "+91 555 0100", "https://www.linkedin.com/in/applicant", "v1",
+    )
+    assert result["application_id"] == application_id
+    assert result["ai_status"] == "Pending"
+    payload = ctx["adapter"].submit_application.call_args.args[0]
+    assert payload["candidate_name"] == "Confirmed Applicant" and payload["email"] == "confirmed@example.test"
+    assert payload["owner_sub"] == profile.sub and payload["owner_issuer"] == profile.issuer
+    assert payload["phone"] == "+91 555 0100" and payload["linkedin_url"] == "https://www.linkedin.com/in/applicant"
+    assert payload["linkedin_profile"] == profile.model_dump(mode="json", exclude_none=True)
+    assert "evaluation" not in payload and "access_token" not in payload and "id_token" not in payload
+
+    async def compare_resume(text, job):
+        assert stages == ["candidate_and_application_saved", "evaluation_queued"]
+        stages.append("resume_compared_with_jd")
+        return sample_evaluation()
+
+    async def evaluation_saved(payload):
+        assert payload["application_id"] == application_id
+        assert payload["requirement_id"] == ctx["job"].requirement_id
+        assert "candidate_name" not in payload and "email" not in payload and "linkedin_profile" not in payload
+        assert stages[-1] == "resume_compared_with_jd"
+        stages.append("separate_evaluation_saved")
+        return {"success": True}
+
+    ctx["ai"].evaluate.side_effect = compare_resume
+    ctx["adapter"].save_candidate_evaluation.side_effect = evaluation_saved
+    assert await evaluate_application(ctx, *queued.call_args.args[1:]) == {"status": "completed"}
+    assert stages == [
+        "candidate_and_application_saved", "evaluation_queued", "resume_compared_with_jd", "separate_evaluation_saved",
+    ]
+
+
+async def test_ready_outbox_retry_preserves_original_provider_snapshot_without_changing_contact_idempotency(durable_context):
+    ctx = durable_context
+    original = LinkedInProfile(
+        sub=ctx["user"].sub, issuer=ctx["user"].issuer, name="Original LinkedIn Name",
+        picture="https://media.example.test/original.png",
+    )
+    ctx["user"] = ctx["user"].model_copy(update={"linkedin_profile": original})
+    ctx["adapter"].submit_application.side_effect = [
+        IntegrationError("Temporary upstream outage"),
+        {"application_id": ctx["settings"].redis_prefix + "-application"},
+    ]
+    with pytest.raises(IntegrationError):
+        await submit(ctx)
+    ctx["user"] = ctx["user"].model_copy(update={
+        "linkedin_profile": original.model_copy(update={"picture": "https://media.example.test/new.png"}),
+    })
+    result = await submit(ctx)
+    assert result["application_id"] == ctx["settings"].redis_prefix + "-application"
+    ctx["resumes"].store.assert_awaited_once()
+    for attempt in ctx["adapter"].submit_application.call_args_list:
+        assert attempt.args[0]["linkedin_profile"] == original.model_dump(mode="json", exclude_none=True)
 
 
 async def test_expired_local_idempotency_cannot_evaluate_old_remote_application_with_new_resume(durable_context):

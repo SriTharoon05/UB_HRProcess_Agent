@@ -1,19 +1,69 @@
 import json
 import logging
+import re
 import secrets
 from http.cookies import SimpleCookie
 from typing import Literal
+from urllib.parse import unquote, urlsplit
 
 from authlib.integrations.starlette_client import OAuth
 from authlib.integrations.starlette_client.apps import StarletteOAuth2App
 from authlib.oidc.core import CodeIDToken
 from fastapi import HTTPException, Request
 from redis.asyncio import Redis
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from app.config import Settings
 from app.errors import ConfigurationError
 from app.models import User
+from app.profile import linkedin_profile
+
+
+def oauth_return_path(value: str | None, provider: str) -> str:
+    """Only portal routes for the signing-in role can be OAuth destinations."""
+    default = "/candidate/applications" if provider == "linkedin" else "/hr"
+    if value is None:
+        return default
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        raise HTTPException(400, "Invalid sign-in return destination")
+    decoded = value
+    for _ in range(6):
+        if "\\" in decoded or not decoded.isprintable():
+            raise HTTPException(400, "Invalid sign-in return destination")
+        expanded = unquote(decoded)
+        if expanded == decoded:
+            break
+        decoded = expanded
+    else:
+        raise HTTPException(400, "Invalid sign-in return destination")
+    try:
+        parts = urlsplit(value)
+        decoded_path = unquote(parts.path)
+        for _ in range(6):
+            expanded = unquote(decoded_path)
+            if expanded == decoded_path:
+                break
+            decoded_path = expanded
+        if (
+            parts.scheme
+            or parts.netloc
+            or not parts.path.startswith("/")
+            or decoded_path.startswith("//")
+            or "\\" in decoded_path
+            or (any(part in {".", "..", ""} for part in decoded_path[1:].split("/")) and decoded_path != "/")
+        ):
+            raise ValueError("Unsafe relative path")
+        identifier = r"[^/?#]+"
+        pattern = (
+            rf"/(?:jobs(?:/{identifier}(?:/apply)?)?|candidate/applications(?:/{identifier})?)?"
+            if provider == "linkedin"
+            else rf"/hr(?:/jobs(?:/{identifier}(?:/candidates(?:/{identifier})?)?)?|/applications/{identifier})?"
+        )
+        if not re.fullmatch(pattern, decoded_path):
+            raise ValueError("Destination is outside this role's portal")
+    except ValueError:
+        raise HTTPException(400, "Invalid sign-in return destination") from None
+    return value
 
 
 class LinkedInCodeIDToken(CodeIDToken):
@@ -234,10 +284,14 @@ class OIDC:
         return client
 
     async def login(self, request: Request, provider: Literal["linkedin", "hr"]):
+        return_to = oauth_return_path(request.query_params.get("return_to"), provider)
         client = self.client(provider)
         uri = self.settings.linkedin_redirect_uri if provider == "linkedin" else self.settings.entra_redirect_uri
-        # Authlib generates and stores unpredictable state and nonce in the server-side session.
-        return await client.authorize_redirect(request, uri, nonce=secrets.token_urlsafe(32))
+        # Authlib generates unpredictable state and nonce. The destination is
+        # bound to this specific authorization attempt, never a global value.
+        authorization = await client.create_authorization_url(uri, nonce=secrets.token_urlsafe(32))
+        await client.save_authorize_data(request, redirect_uri=uri, return_to=return_to, **authorization)
+        return RedirectResponse(authorization["url"], status_code=302)
 
     def identity(self, claims: dict, provider: str) -> User:
         issuer = (
@@ -253,18 +307,16 @@ class OIDC:
                 raise HTTPException(403, "The configured HR application role is required")
         name = claims.get("name")
         email = claims.get("email") or (claims.get("preferred_username") if provider == "hr" else None)
+        profile = None
         if provider == "linkedin":
             # LinkedIn profile/contact claims are optional. Authentication is
             # bound to the validated issuer/subject; the application form
             # collects required contact details rather than inventing them.
-            name = name.strip() if isinstance(name, str) else ""
+            profile = linkedin_profile(claims, issuer)
+            name = profile.name or ""
             if not name:
-                name = " ".join(
-                    value.strip()
-                    for field in ("given_name", "family_name")
-                    if isinstance(value := claims.get(field), str) and value.strip()
-                )
-            email = email.strip() if isinstance(email, str) else ""
+                name = " ".join(value for value in (profile.given_name, profile.family_name) if value)
+            email = profile.email or ""
         elif not name or not email:
             raise HTTPException(401, "Identity is missing required profile information")
         return User(
@@ -273,6 +325,7 @@ class OIDC:
             email=email,
             issuer=issuer,
             role="candidate" if provider == "linkedin" else "hr",
+            linkedin_profile=profile,
         )
 
     async def callback(self, request: Request, provider: Literal["linkedin", "hr"]):
@@ -286,6 +339,7 @@ class OIDC:
             state_data = await client.framework.get_state_data(request.session, request.query_params.get("state"))
             if not state_data or not state_data.get("nonce"):
                 raise HTTPException(401, "Authentication state is missing or expired")
+            return_to = oauth_return_path(state_data.get("return_to"), provider)
             token = await client.authorize_access_token(
                 request,
                 claims_options={
@@ -306,11 +360,15 @@ class OIDC:
                 profile = await client.userinfo(token=token)
                 if not isinstance(profile.get("sub"), str) or not profile["sub"] or profile["sub"] != claims.get("sub"):
                     raise HTTPException(401, "LinkedIn profile does not match the identity token")
+                if profile.get("email") is not None and profile["email"] != claims.get("email"):
+                    # Verification refers to a particular mailbox. A token's
+                    # flag cannot verify a different userinfo contact address.
+                    claims.pop("email_verified", None)
                 # The profile response cannot replace validated token claims.
                 claims.update(
                     {
                         field: profile[field]
-                        for field in ("name", "given_name", "family_name", "email", "email_verified")
+                        for field in ("name", "given_name", "family_name", "picture", "locale", "email", "email_verified")
                         if profile.get(field) is not None
                     }
                 )
@@ -337,4 +395,5 @@ class OIDC:
         request.session.clear()
         request.session.update(user=user.model_dump(), csrf_token=secrets.token_urlsafe(32))
         request.state.rotate_session = True
+        request.state.oauth_return_to = return_to
         return user

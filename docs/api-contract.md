@@ -2,13 +2,13 @@
 
 All frontend requests use same-origin `/api` and `/auth` (Vite proxies to port 8000), credentials included. JSON uses snake_case. API errors use `{detail: string}`. No secrets in frontend.
 
-For a LinkedIn user, `User.name` and `User.email` can be empty strings when the provider does not supply them. Sign-in and ownership use the validated issuer/subject. The application form collects the required contact details before submission.
+For a LinkedIn user, `User.name` and `User.email` can be empty strings when the provider does not supply them; only a valid email can prefill contact input. Optional `User.linkedin_profile` contains the sanitized standard public-profile fields listed below. Sign-in and ownership use the validated issuer/subject. The application form displays the supplied profile information and collects required contact details before submission.
 
 - `GET /api/health` -> `{status: "ok", demo_mode: boolean, app_name: string}`
 - `GET /api/auth/me` -> `{user: User|null, csrf_token: string, demo_mode: boolean, consent_version: string}`. Mutations send `X-CSRF-Token`.
 - `POST /api/auth/demo` JSON `{role: "candidate"|"hr"}` -> auth response; requires CSRF, development demo only.
 - `POST /api/auth/logout` -> `{success:true}`.
-- `/auth/linkedin/login`, `/auth/hr/login` -> OIDC redirect. Callback redirects to frontend candidate applications or /hr.
+- `/auth/linkedin/login`, `/auth/hr/login` -> OIDC redirect. Optional `return_to` is a validated relative route bound to server-side OAuth state. Callback returns to that saved route on the configured frontend origin, defaulting to candidate applications or /hr. Callback query parameters cannot override it.
 - `GET /api/jobs` and HR `/api/hr/jobs` -> `Job[]`; query `search`, `department`, `location`, `work_mode`, `employment_type` supported.
 - `GET /api/jobs/{requirement_id}` -> `Job`.
 - `POST /api/applications`: multipart `requirement_id`, `candidate_name`, `email`, `resume` PDF/DOCX, `phone`, `linkedin_url`, `consent_accepted=true`, `consent_version` from the current auth response (default `v1`). Full name and valid contact email are required before storing/submitting the resume. Older clients may omit contact fields only when complete contact data is already available in the session. Contact input cannot change the authenticated issuer, subject, or role. `Idempotency-Key` is stable per form submission; changing effective contact details with the same key returns 409. -> `{success:true, application_id:string, ai_status:string, message:string}`.
@@ -18,7 +18,8 @@ For a LinkedIn user, `User.name` and `User.email` can be empty strings when the 
 - `GET /api/hr/applications/{id}/resume` -> authorized PDF/DOCX stream; reference must come from D365 or demo adapter.
 
 ```ts
-interface User {sub:string; name:string; email:string; role:'candidate'|'hr'; issuer:string}
+interface LinkedInProfile {sub:string; issuer:string; name:string|null; given_name:string|null; family_name:string|null; email:string|null; email_verified:boolean|null; picture:string|null; locale:string|null}
+interface User {sub:string; name:string; email:string; role:'candidate'|'hr'; issuer:string; linkedin_profile?:LinkedInProfile|null}
 interface Job {requirement_id:string; title:string; description:string; responsibilities:string; required_skills:string[]; preferred_skills:string[]; qualifications:string; department:string; location:string; work_mode:string; employment_type:string; min_experience:number|null; max_experience:number|null; openings:number|null; status:string; published_date:string|null; deadline:string|null}
 interface Application {application_id:string; requirement_id:string; job_title:string; candidate_name:string; email:string; applied_date:string|null; hr_status:string; ai_status:string; resume_file_name:string; demo_fixture?:boolean}
 interface Evidence {requirement:string; resume_section:string; project_name:string; evidence:string; reason:string; evidence_strength:string}

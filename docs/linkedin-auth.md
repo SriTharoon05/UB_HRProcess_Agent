@@ -24,7 +24,35 @@ After validating the ID token, the backend retrieves LinkedIn's user-info respon
 
 LinkedIn profile name, email, and `email_verified` are optional. A subject-only profile can sign in with empty contact fields; the backend does not invent a name or email address. The application form prefills available profile data and requires the candidate to confirm a full name and valid contact email before submission. Contact details can be edited, are not used for authorization, and are not presented as verified by LinkedIn. Microsoft Entra's required profile information and HR role checks remain strict.
 
-State and the nonce challenge are kept in the backend session. An invalid, replayed, or unverifiable callback fails; raw token responses are not logged. Callback diagnostics contain only the provider, exception class, and allowlisted error/claim identifiers. On successful login the backend rotates the opaque session identifier and CSRF token. The browser returns to the candidate application workspace.
+State and the nonce challenge are kept in the backend session. An invalid, replayed, or unverifiable callback fails; raw token responses are not logged. Callback diagnostics contain only the provider, exception class, and allowlisted error/claim identifiers. On successful login the backend rotates the opaque session identifier and CSRF token.
+
+## Return to the selected job
+
+The selected-job sign-in link uses `/auth/linkedin/login?return_to=%2Fjobs%2FREQ-2026-001%2Fapply`. The backend saves the validated return path with that authorization attempt's OAuth state. After a successful callback, it redirects to the configured frontend origin plus the saved path. A callback query cannot replace that saved destination. Only allowed relative routes for the signing-in role are accepted; external URLs, encoded traversal, controls, backslashes, and authentication routes are rejected.
+
+An anonymous candidate who starts applying for a job returns to that same job's application form. The general Sign in link preserves the current job page, including its query and fragment. A sign-in without a requested destination retains the candidate applications or HR workspace default. The LinkedIn developer application's registered callback URI remains the backend `/auth/linkedin/callback`; the frontend destination does not change that registration.
+
+## Profile response and application data
+
+The browser callback contains `code` and `state`. FastAPI exchanges the code on the backend, validates the identity token, and reads LinkedIn user-info. `GET /api/auth/me` returns the sanitized candidate identity and optional `user.linkedin_profile` object:
+
+```json
+{
+  "sub": "example-linkedin-subject",
+  "issuer": "https://www.linkedin.com/oauth",
+  "name": "Alex Example",
+  "given_name": "Alex",
+  "family_name": "Example",
+  "email": "alex@example.com",
+  "email_verified": true,
+  "picture": "https://media.licdn.com/dms/image/example",
+  "locale": "en-IN"
+}
+```
+
+This is an illustrative public-profile object, not a guaranteed LinkedIn response. Unavailable optional fields are null. The form displays only available name, given/family name, valid email and its supplied verification status, permitted HTTPS LinkedIn photo, locale, and the separate account identifier. An opaque identifier such as `urn:li:member:...` is never an email prefill or an inferred public profile URL. Provider access/ID/refresh tokens and arbitrary raw claims are not included.
+
+Before submission, the candidate confirms the editable full name and contact email, fills optional phone/profile URL, uploads a resume, and accepts consent. The authenticated issuer/subject remain fixed. The D365 submission includes the confirmed contact details and a separate optional provider-profile snapshot. Candidate/application persistence must complete before an `ApplicationId` is acknowledged and evaluation is queued. The worker saves resume/JD matching results through the separate evaluation service, linked by that identifier. See [D365 contracts](d365-endpoints.md).
 
 ## Microsoft Entra HR users
 

@@ -1,11 +1,12 @@
 """Explicitly fictional fixtures, isolated from production integrations."""
 
 import secrets
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from app.models import Candidate, Evaluation, Evidence, Gap, Job, User
+from app.models import Candidate, Evaluation, Evidence, Gap, Job, LinkedInProfile, User
 
 
 def now():
@@ -123,6 +124,10 @@ class DemoAdapter:
                 owner_issuer="demo",
             )
         self.idempotency: dict[str, dict] = {}
+        # Explicit local-demo stand-ins for the candidate/application tables.
+        # They are private, process-local records, never connected D365 writes.
+        self.candidate_information: dict[tuple[str, str], dict] = {}
+        self.application_information: dict[str, dict] = {}
 
     async def get_open_requirements(self):
         return self.jobs
@@ -132,10 +137,25 @@ class DemoAdapter:
         if key in self.idempotency:
             return self.idempotency[key]
         job = next(j for j in self.jobs if j.requirement_id == payload["requirement_id"])
+        identity = (payload["owner_issuer"], payload["owner_sub"])
+        previous = self.candidate_information.get(identity)
+        candidate_id = previous["candidate_id"] if previous else f"DEMO-CAND-{secrets.token_hex(5).upper()}"
+        contact = {
+            "candidate_id": candidate_id,
+            **{field: payload.get(field, "") for field in (
+                "owner_issuer", "owner_sub", "candidate_name", "email", "phone", "linkedin_url",
+                "consent_version", "consent_date",
+            )},
+            "consent_accepted": payload["consent_accepted"],
+        }
+        if payload.get("linkedin_profile") is not None:
+            contact["linkedin_profile"] = LinkedInProfile.model_validate(payload["linkedin_profile"]).model_dump(
+                mode="json", exclude_none=True,
+            )
         aid = f"DEMO-APP-{secrets.token_hex(6).upper()}"
-        self.records[aid] = Candidate(
+        record = Candidate(
             application_id=aid,
-            candidate_id=f"DEMO-CAND-{secrets.token_hex(5).upper()}",
+            candidate_id=candidate_id,
             requirement_id=job.requirement_id,
             job_title=job.title,
             candidate_name=payload["candidate_name"],
@@ -152,7 +172,19 @@ class DemoAdapter:
             owner_issuer=payload["owner_issuer"],
             resume_ref=payload["resume_ref"],
         )
-        result = {"application_id": aid, "candidate_id": self.records[aid].candidate_id}
+        # Save contact before acknowledging application creation. Each
+        # application keeps its own snapshot when this identity applies again.
+        self.candidate_information[identity] = deepcopy(contact)
+        self.application_information[aid] = {
+            "application_id": aid,
+            **deepcopy(contact),
+            **{field: payload.get(field, "") for field in (
+                "requirement_id", "resume_ref", "resume_file_name", "resume_sha256",
+                "job_description_hash", "idempotency_key",
+            )},
+        }
+        self.records[aid] = record
+        result = {"application_id": aid, "candidate_id": candidate_id}
         self.idempotency[key] = result
         return result
 

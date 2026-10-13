@@ -78,7 +78,7 @@ export function Protected({
     return (
       <Navigate
         to={role === "hr" ? "/hr/login" : "/login"}
-        state={{ from: location.pathname }}
+        state={{ from: `${location.pathname}${location.search}${location.hash}` }}
         replace
       />
     );

@@ -10,6 +10,7 @@ React communicates with FastAPI. D365 Finance & Operations remains the business 
 
 - Browse and filter open jobs; read the full job description.
 - Sign in as a demo candidate or use configured LinkedIn OIDC in connected mode.
+- Return from LinkedIn to the selected job, inspect the shared profile details, and confirm the remaining application contact information.
 - Upload a validated PDF/DOCX, accept consent, and submit an application with retry protection.
 - Review your own application status where the D365 read capability is configured.
 - Sign in to the separate HR workspace; inspect candidates for one job and review scores, explanations, and supporting resume evidence.
@@ -41,6 +42,8 @@ flowchart LR
 ```
 
 See [architecture and data ownership](docs/architecture.md) for the processing flow and [API contract](docs/api-contract.md) for frontend/backend interfaces.
+
+The [LinkedIn application form on desktop](docs/screenshots/linkedin-profile-desktop.png) and [mobile](docs/screenshots/linkedin-profile-mobile.png) show the returned profile and editable contact fields using a fictional browser-test identity.
 
 ## Run locally
 

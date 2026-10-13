@@ -236,7 +236,10 @@ export function AppShell() {
               </div>
             ) : (
               <Button asChild variant="secondary" size="sm">
-                <NavLink to="/login">
+                <NavLink
+                  to="/login"
+                  state={{ from: `${location.pathname}${location.search}${location.hash}` }}
+                >
                   Sign in
                   <ExternalLink size={13} />
                 </NavLink>

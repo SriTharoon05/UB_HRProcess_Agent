@@ -3,6 +3,7 @@ import hashlib
 import logging
 import time
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 from fastapi import HTTPException
@@ -10,7 +11,7 @@ from joserfc import jwt
 from joserfc.jwk import RSAKey
 from starlette.requests import Request
 
-from app.auth import OIDC
+from app.auth import OIDC, oauth_return_path
 from app.config import Settings
 
 
@@ -372,3 +373,206 @@ def test_entra_role_tenant_and_issuer_checks():
     for changes in [{"roles": []}, {"tid": "wrong"}, {"iss": "https://evil.test"}]:
         with pytest.raises(HTTPException):
             oidc.identity({**claims, **changes}, "hr")
+
+
+@pytest.mark.parametrize(
+    "provider, destination",
+    [
+        ("linkedin", "/"),
+        ("linkedin", "/jobs?search=React%20Developer&department=Engineering#open-roles"),
+        ("linkedin", "/jobs/REQ-2026-001"),
+        ("linkedin", "/jobs/REQ%20A/apply"),
+        ("linkedin", "/candidate/applications"),
+        ("linkedin", "/candidate/applications/APP-001"),
+        ("hr", "/hr"),
+        ("hr", "/hr/jobs"),
+        ("hr", "/hr/jobs/REQ-001/candidates?limit=10"),
+        ("hr", "/hr/jobs/REQ-001/candidates/APP-001"),
+    ],
+)
+def test_oauth_return_allows_only_portal_routes_for_provider(provider, destination):
+    assert oauth_return_path(destination, provider) == destination
+
+
+@pytest.mark.parametrize(
+    "destination",
+    [
+        "https://evil.test/jobs/REQ-001/apply",
+        "//evil.test/jobs/REQ-001/apply",
+        "/%2f%2fevil.test",
+        "/jobs/REQ-001/../apply",
+        "/jobs/../hr",
+        "/jobs/%2e%2e/apply",
+        "/jobs/%252e%252e/apply",
+        "/jobs/REQ%2fOTHER/apply",
+        "/jobs/REQ%252fOTHER/apply",
+        "/jobs//apply",
+        "/jobs/REQ-001/apply/",
+        "\\\\evil.test\\jobs\\REQ-001\\apply",
+        "/jobs/REQ-001\\apply",
+        "/jobs/REQ-001%5capply",
+        "/jobs/REQ-001/apply?search=%0d%0aLocation%3Aevil",
+        "/jobs/REQ-001/apply#%250aInjected",
+        "/jobs/REQ-001/apply\x7f",
+        "/jobs/REQ-001/apply\n",
+        "jobs/REQ-001/apply",
+        "",
+        "/auth/linkedin/callback",
+        "/login",
+        "/hr",
+        "/hr/jobs/REQ-001/candidates",
+        "/jobs/" + "x" * 2048,
+    ],
+)
+def test_linkedin_return_rejects_external_ambiguous_or_wrong_role_destinations(destination):
+    with pytest.raises(HTTPException) as error:
+        oauth_return_path(destination, "linkedin")
+    assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize("destination", ["/", "/jobs/REQ-001/apply", "/candidate/applications", "/auth/hr/login"])
+def test_hr_return_rejects_candidate_and_auth_destinations(destination):
+    with pytest.raises(HTTPException) as error:
+        oauth_return_path(destination, "hr")
+    assert error.value.status_code == 400
+
+
+async def test_login_binds_each_return_destination_to_its_own_server_side_oauth_state():
+    oidc, client, req = await configured_callback()
+    client.load_server_metadata.return_value["authorization_endpoint"] = "https://www.linkedin.com/oauth/v2/authorization"
+    req.session.clear()
+    previous_state = None
+    for destination in ("/jobs/REQ-001/apply", "/jobs/REQ-002/apply"):
+        req = Request({**req.scope, "query_string": urlencode({"return_to": destination}).encode()})
+        response = await oidc.login(req, "linkedin")
+        params = parse_qs(urlsplit(response.headers["location"]).query)
+        state = params["state"][0]
+        state_data = await client.framework.get_state_data(req.session, state)
+        assert state_data["return_to"] == destination
+        assert state_data["nonce"] == params["nonce"][0]
+        assert state_data["redirect_uri"] == oidc.settings.linkedin_redirect_uri
+        assert "return_to" not in params
+        if previous_state:
+            assert state != previous_state
+            # Authlib invalidates previous attempts instead of sharing the
+            # latest destination with an older callback.
+            assert await client.framework.get_state_data(req.session, previous_state) is None
+        previous_state = state
+
+
+async def test_login_rejects_invalid_return_before_authorization_request():
+    oidc, client, req = await configured_callback()
+    client.create_authorization_url = AsyncMock()
+    req.scope["query_string"] = urlencode({"return_to": "https://evil.test"}).encode()
+    with pytest.raises(HTTPException) as error:
+        await oidc.login(req, "linkedin")
+    assert error.value.status_code == 400
+    client.create_authorization_url.assert_not_awaited()
+
+
+async def test_callback_uses_stored_job_destination_and_ignores_callback_override():
+    oidc, client, req = await configured_callback()
+    state_data = await client.framework.get_state_data(req.session, "expected-state")
+    await client.framework.set_state_data(
+        req.session, "expected-state", {**state_data, "return_to": "/jobs/REQ-001/apply?source=jobs#contact"}
+    )
+    req.scope["query_string"] = urlencode(
+        {"state": "expected-state", "code": "code", "return_to": "https://evil.test"}
+    ).encode()
+    user = await oidc.callback(req, "linkedin")
+    assert user.role == "candidate"
+    assert req.state.oauth_return_to == "/jobs/REQ-001/apply?source=jobs#contact"
+    assert all("_state_" not in key for key in req.session)
+
+
+async def test_callback_revalidates_stored_destination_before_token_exchange():
+    oidc, client, req = await configured_callback()
+    state_data = await client.framework.get_state_data(req.session, "expected-state")
+    await client.framework.set_state_data(req.session, "expected-state", {**state_data, "return_to": "/hr"})
+    with pytest.raises(HTTPException) as error:
+        await oidc.callback(req, "linkedin")
+    assert error.value.status_code == 400
+    client.fetch_access_token.assert_not_awaited()
+    assert "user" not in req.session
+    assert not hasattr(req.state, "oauth_return_to")
+
+
+@pytest.mark.parametrize("provider, destination", [("linkedin", "/candidate/applications"), ("hr", "/hr")])
+async def test_callback_without_return_destination_preserves_existing_defaults(provider, destination):
+    oidc, _, req = await configured_callback(provider=provider)
+    await oidc.callback(req, provider)
+    assert req.state.oauth_return_to == destination
+
+
+async def test_linkedin_exposes_only_sanitized_standard_public_profile_fields():
+    oidc, client, req = await configured_callback(omitted=("nonce",))
+    client.userinfo.return_value.update(
+        given_name=" Fictional ", family_name=" Tester ",
+        picture="https://media.licdn.com/dms/image/test-avatar", locale={"language": "en", "country": "US"},
+        access_token="private-access-token", refresh_token="private-refresh-token", id_token="private-id-token",
+        phone_number="private-phone", address={"private-address": "secret"}, arbitrary="private-provider-field",
+    )
+    user = await oidc.callback(req, "linkedin")
+    assert user.linkedin_profile.model_dump(exclude_none=True) == {
+        "sub": "user-1", "issuer": oidc.settings.linkedin_issuer,
+        "name": "Fictional Tester", "given_name": "Fictional", "family_name": "Tester",
+        "email": "test@example.test", "email_verified": True,
+        "picture": "https://media.licdn.com/dms/image/test-avatar", "locale": "en-US",
+    }
+    assert "private-" not in str(req.session)
+    assert "token" not in str(req.session["user"])
+
+
+@pytest.mark.parametrize(
+    "email",
+    ["urn:li:member:1503054821", "invalid", "x@example", "a..b@example.test", "a@-example.test", "a@example.test\nInjected"],
+)
+async def test_linkedin_does_not_use_member_ids_or_invalid_contacts_as_email(email):
+    oidc, client, req = await configured_callback(omitted=("nonce",))
+    client.userinfo.return_value.update(email=email, email_verified=True)
+    user = await oidc.callback(req, "linkedin")
+    assert user.email == "" and user.linkedin_profile.email is None
+    assert user.linkedin_profile.email_verified is None
+
+
+@pytest.mark.parametrize("verified", [None, "true", 1])
+async def test_changed_profile_email_does_not_inherit_verification_from_another_address(verified):
+    oidc, client, req = await configured_callback(omitted=("nonce",))
+    client.userinfo.return_value = {"sub": "user-1", "email": "different@example.test", "email_verified": verified}
+    user = await oidc.callback(req, "linkedin")
+    assert user.email == "different@example.test"
+    assert user.linkedin_profile.email_verified is None
+
+
+@pytest.mark.parametrize(
+    "picture",
+    [
+        "javascript:alert(1)", "http://media.licdn.com/avatar", "https://127.0.0.1/private", "https://evil.test/avatar",
+        "https://media.licdn.com.evil.test/avatar", "https://user:password@media.licdn.com/avatar",
+        "https://media.licdn.com:444/avatar", "https://media.licdn.com/ava tar", "https://media.licdn.com/ava\\tar",
+    ],
+)
+async def test_linkedin_unsafe_profile_picture_is_omitted(picture):
+    oidc, client, req = await configured_callback()
+    client.userinfo.return_value["picture"] = picture
+    user = await oidc.callback(req, "linkedin")
+    assert user.linkedin_profile.picture is None
+
+
+@pytest.mark.parametrize(
+    "locale, expected",
+    [("en-US", "en-US"), ("en_US", "en-US"), ({"language": "ta", "country": "IN"}, "ta-IN"),
+     ({"language": "en"}, "en"), ({"language": 123, "country": "US"}, None),
+     ({"language": "en", "country": []}, None), ("<script>", None)],
+)
+async def test_linkedin_locale_supports_standard_string_and_provider_object(locale, expected):
+    oidc, client, req = await configured_callback()
+    client.userinfo.return_value["locale"] = locale
+    user = await oidc.callback(req, "linkedin")
+    assert user.linkedin_profile.locale == expected
+
+
+async def test_hr_identity_has_no_linkedin_profile():
+    oidc, _, req = await configured_callback(provider="hr")
+    user = await oidc.callback(req, "hr")
+    assert user.linkedin_profile is None

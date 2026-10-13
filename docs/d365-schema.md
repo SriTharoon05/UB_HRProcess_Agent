@@ -2,6 +2,8 @@
 
 D365 Finance & Operations is the business system of record. The portal communicates through JSON custom services; it does not connect to D365 SQL and does not maintain a second SQL business database. Redis holds temporary sessions, submission coordination, job state, and cached processing context. Azure Blob Storage holds private documents.
 
+Demo mode keeps private candidate information keyed by issuer/subject and separate per-application contact/profile/document snapshots in memory. A later application updates that demo candidate's current contact details while preserving previous application snapshots and reusing the candidate ID. Demo records reset on backend restart; their displayed evaluations are fictional fixtures and no D365 table writes occur.
+
 These are proposed logical tables and field definitions for the D365 team to review in Visual Studio 2022/X++. The existing requirement table's physical name, extended data types, enum values, and service fields have not been verified. Reuse existing candidate/application tables when suitable. The Python adapter normalizes service contracts; it does not create tables or deploy X++.
 
 ## Relationships
@@ -62,12 +64,17 @@ Return open, currently eligible requirements. Recheck eligibility at application
 | Email | String(320) | Candidate contact email |
 | Phone | String(30) | Optional contact number |
 | LinkedInUrl | String(500) | Optional candidate-supplied URL |
+| LinkedInProfileJson | Memo | Optional allowlisted snapshot of the profile returned by LinkedIn, separate from edited contact details |
 | ConsentDateTime | UtcDateTime | Consent capture timestamp |
 | CreatedDateTime | UtcDateTime | Creation time |
 | ModifiedDateTime | UtcDateTime | Latest modification time |
 | DataAreaId | String | Legal entity/company |
 
 Identity is `(LinkedInIssuer, LinkedInSub)` within the chosen company policy, never name or email. LinkedIn's `openid profile email` scopes do not guarantee complete contact information, a profile URL, employment history, or skills. The application form prefills available profile data and collects the required full name and contact email plus optional contact fields. These editable fields do not replace the authenticated identity. Upsert an existing identity before creating a new candidate.
+
+`LinkedInProfileJson` preserves the validated subject/issuer and only permitted profile fields actually supplied by LinkedIn: name, given/family names, valid email and its verification flag, HTTPS picture URL, and locale. Keep the original OIDC field names inside this JSON; do not store access tokens, ID tokens, refresh tokens, raw token responses, or session state. A subject identifier or member URN is an identity, not an email or public profile URL. Missing profile data stays absent and the candidate enters missing contact information in the application form. Adding this optional memo field requires a reviewed X++ table/contract extension; it is not deployed by the portal.
+
+An `email_verified` value describes the provider email in that snapshot. It does not verify a different contact email entered by the candidate or confer HR access.
 
 ## Job application: `UBHRJobApplication`
 
@@ -78,6 +85,10 @@ Identity is `(LinkedInIssuer, LinkedInSub)` within the chosen company policy, ne
 | CandidateRecId | Int64 | Foreign key to candidate `RecId` |
 | RequirementRecId | Int64 | Foreign key to actual requirement table `RecId` |
 | RequirementId | String(50) | External job identifier |
+| FullName | String(200) | Name confirmed for this application, preserved independently of later candidate-master changes |
+| Email | String(320) | Contact email confirmed for this application |
+| Phone | String(30) | Optional contact number confirmed for this application |
+| LinkedInUrl | String(500) | Optional supplied public profile URL confirmed for this application |
 | ResumeFileName | String(255) | Sanitized display filename |
 | ResumeBlobKey | String(500) | Private storage object reference, not a public URL |
 | ResumeSha256 | String(64) | SHA-256 of uploaded document |
@@ -87,11 +98,14 @@ Identity is `(LinkedInIssuer, LinkedInSub)` within the chosen company policy, ne
 | AIStatus | Enum | Pending / Processing / Completed / Failed |
 | HRStatus | Enum | New / Reviewing / Interview / Closed |
 | ConsentVersion | String(20) | Accepted privacy/processing notice version |
+| ConsentDateTime | UtcDateTime | Consent timestamp captured for this application |
 | CreatedDateTime | UtcDateTime | Creation time |
 | ModifiedDateTime | UtcDateTime | Latest modification time |
 | DataAreaId | String | Legal entity/company |
 
 Foreign keys: `CandidateRecId → UBHRCandidate.RecId`; `RequirementRecId → ExistingJobRequirementTable.RecId`. Validate that referenced records belong to the authorized company. Resolve the proposed 40/50-character requirement identifier discrepancy to one shared EDT before deployment.
+
+`submitApplication` must commit the candidate identity upsert, candidate contact/profile updates, and the new job application (including the confirmed contact snapshot, document reference, and consent) in one transaction before returning `Success=true` and its stable `ApplicationId`. The backend queues resume-to-JD evaluation only after this acknowledgement. Evaluation belongs in `UBHRMatchEvaluation`, linked by that application; a login or profile prefill alone must not create an application or run AI comparison.
 
 The portal sends a stable idempotency key for retries. The D365 service must persist an equivalent unique request reference atomically, for example an additional `SubmissionIdempotencyKey` EDT/field or the existing integration request table. A Redis lock alone cannot guarantee uniqueness after Redis loss or an ambiguous HTTP timeout. Define separately whether a candidate may submit a revised resume for the same job; the portal's transport idempotency does not decide that business policy.
 

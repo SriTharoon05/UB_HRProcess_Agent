@@ -116,6 +116,61 @@ def test_optional_contract_fields_can_be_omitted(settings):
     assert body == {"_request": {"JDHash": "abc"}}
 
 
+async def test_submit_profile_snapshot_stays_separate_from_confirmed_contact_and_serializes_oidc_keys(settings, msal_app):
+    calls = []
+    profile = {
+        "sub": "subject",
+        "issuer": "https://www.linkedin.com/oauth",
+        "name": "Provider Applicant",
+        "given_name": "Provider",
+        "family_name": "Applicant",
+        "email": "provider@example.test",
+        "email_verified": False,
+        "picture": "https://media.example.test/profile.png",
+        "locale": "en_IN",
+    }
+
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"Success": True, "ApplicationId": "APP-1"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await D365Service(settings, client=client, msal_app=msal_app).submit_application({
+            "requirement_id": "REQ-1",
+            "owner_issuer": profile["issuer"],
+            "owner_sub": profile["sub"],
+            "candidate_name": "Confirmed Applicant",
+            "email": "confirmed@example.test",
+            "phone": "+91 555 0100",
+            "linkedin_url": "https://www.linkedin.com/in/confirmed-applicant",
+            "linkedin_profile": profile,
+        })
+    body = calls[0]["_request"]
+    assert body["FullName"] == "Confirmed Applicant"
+    assert body["Email"] == "confirmed@example.test"
+    assert body["LinkedInIssuer"] == profile["issuer"] and body["LinkedInSub"] == profile["sub"]
+    assert body["Phone"] == "+91 555 0100"
+    assert body["LinkedInUrl"] == "https://www.linkedin.com/in/confirmed-applicant"
+    assert json.loads(body["LinkedInProfileJson"]) == profile
+    assert normalize({"LinkedInProfileJson": body["LinkedInProfileJson"]})["linkedin_profile"] == profile
+    assert "Score" not in body and "Evaluation" not in body
+
+
+def test_profile_contract_can_be_renamed_or_omitted_and_rejects_private_token_fields(settings):
+    profile = {"sub": "subject", "issuer": "https://www.linkedin.com/oauth", "name": None}
+    settings.d365_request_field_maps = {"submit_application": {"linkedin_profile": "ProviderProfileJson"}}
+    body = D365Service(settings)._body("submit_application", {"linkedin_profile": profile})
+    assert json.loads(body["_request"]["ProviderProfileJson"]) == {"sub": "subject", "issuer": profile["issuer"]}
+    settings.d365_request_field_maps = {"submit_application": {"linkedin_profile": ""}}
+    assert D365Service(settings)._body("submit_application", {"linkedin_profile": profile}) == {"_request": {}}
+    settings.d365_request_field_maps = {}
+    with pytest.raises(IntegrationError, match="Only permitted LinkedIn profile fields") as error:
+        D365Service(settings)._body("submit_application", {"linkedin_profile": {**profile, "access_token": "private-sentinel"}})
+    assert "private-sentinel" not in str(error.value)
+    with pytest.raises(IntegrationError, match="malformed profile JSON"):
+        normalize({"LinkedInProfileJson": "not JSON"})
+
+
 async def test_hr_ranking_scoped_to_requirement_and_owned_history(settings, msal_app):
     rows = [candidate("APP-LOW", 52), candidate("APP-HIGH", 91)]
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"Candidates": rows}))) as client:

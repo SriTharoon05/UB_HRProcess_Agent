@@ -17,11 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict
 
-from app.auth import OIDC, OpaqueSessionMiddleware, SessionStore, candidate_user, hr_user, require_csrf
+from app.auth import OIDC, OpaqueSessionMiddleware, SessionStore, candidate_user, hr_user, oauth_return_path, require_csrf
 from app.config import Settings, get_settings
 from app.demo import DemoAdapter
 from app.errors import IntegrationError, ResumeValidationError
 from app.models import Application, User
+from app.profile import valid_contact_email
 from app.queue import SubmissionCoordinator, submission_fingerprint
 from app.services.d365 import D365Service
 from app.services.resumes import ResumeService
@@ -78,18 +79,7 @@ def validate_application_contact(candidate_name: str, email: str) -> tuple[str, 
         or not any(character.isalpha() for character in candidate_name)
     ):
         raise HTTPException(422, "Enter your full name using up to 200 characters")
-    local, separator, domain = email.partition("@")
-    atom = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
-    labels = domain.split(".")
-    if (
-        not separator
-        or len(email) > 320
-        or len(local) > 64
-        or len(domain) > 253
-        or not re.fullmatch(atom + r"(?:\." + atom + r")*", local)
-        or len(labels) < 2
-        or any(not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) for label in labels)
-    ):
+    if not valid_contact_email(email):
         raise HTTPException(422, "Enter a valid contact email using up to 320 characters")
     return candidate_name, email
 
@@ -219,7 +209,7 @@ def create_app(settings: Settings | None = None):
     async def oidc_callback(provider: Literal["linkedin", "hr"], request: Request):
         await app.state.oidc.callback(request, provider)
         return RedirectResponse(
-            settings.frontend_url.rstrip("/") + ("/candidate/applications" if provider == "linkedin" else "/hr"),
+            settings.frontend_url.rstrip("/") + oauth_return_path(getattr(request.state, "oauth_return_to", None), provider),
             status_code=303,
         )
 

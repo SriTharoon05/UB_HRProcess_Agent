@@ -108,6 +108,10 @@ class SubmissionCoordinator:
                 "consent_date": datetime.now(timezone.utc).isoformat(),
                 "idempotency_key": hashlib.sha256((key + fingerprint + job_hash).encode()).hexdigest(),
             }
+            if user.linkedin_profile is not None:
+                # This snapshot comes from validated provider data, not editable
+                # form fields. Retry the recorded first submission unchanged.
+                payload["linkedin_profile"] = user.linkedin_profile.model_dump(mode="json", exclude_none=True)
             record = {
                 "stage": "ready",
                 "fingerprint": fingerprint,

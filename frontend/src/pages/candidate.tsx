@@ -37,6 +37,9 @@ import {
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { returnPath, signInHref } from "../lib/sign-in";
+import { contactEmail } from "../lib/profile";
+import { LinkedInProfileSummary } from "../components/linkedin-profile";
 import {
   dateLabel,
   emptyFilters,
@@ -601,15 +604,22 @@ export function JobDetailsPage() {
               </div>
             </dl>
             <Button asChild className="full-width">
-              <Link to={`/jobs/${job.requirement_id}/apply`}>
-                Apply now
-                <ArrowRight size={16} />
-              </Link>
+              {session?.user?.role === "candidate" ? (
+                <Link to={`/jobs/${encodeURIComponent(job.requirement_id)}/apply`}>
+                  Apply now
+                  <ArrowRight size={16} />
+                </Link>
+              ) : (
+                <a href={signInHref(false, `/jobs/${encodeURIComponent(job.requirement_id)}/apply`)}>
+                  <Linkedin size={16} />
+                  Sign in with LinkedIn to apply
+                </a>
+              )}
             </Button>
             {!session?.user && (
               <p className="small-note">
                 <Linkedin size={13} />
-                Sign in with LinkedIn to apply
+                Return to this role’s application after sign-in.
               </p>
             )}
           </section>
@@ -632,14 +642,8 @@ export function LoginPage({ hr = false }: { hr?: boolean }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [busy, setBusy] = useState(false);
-  const from =
-    typeof location.state?.from === "string" &&
-    location.state.from.startsWith("/") &&
-    !location.state.from.startsWith("//")
-      ? location.state.from
-      : hr
-        ? "/hr"
-        : "/candidate/applications";
+  const requestedReturn = returnPath(location.state?.from, hr);
+  const from = requestedReturn || (hr ? "/hr" : "/candidate/applications");
   async function demo() {
     setBusy(true);
     try {
@@ -721,7 +725,7 @@ export function LoginPage({ hr = false }: { hr?: boolean }) {
           </Button>
         )}
         <Button asChild variant="dark" className="full-width">
-          <a href={hr ? "/auth/hr/login" : "/auth/linkedin/login"}>
+          <a href={signInHref(hr, requestedReturn)}>
             {hr ? <ShieldCheck size={17} /> : <Linkedin size={17} />}
             {hr ? "Sign in with Microsoft" : "Continue with LinkedIn"}
             <ArrowRight size={15} />
@@ -837,6 +841,9 @@ export function ApplyPage() {
   });
   const { session } = useAuth();
   const user = session?.user;
+  const profileName = user?.name.trim() || user?.linkedin_profile?.name?.trim() ||
+    [user?.linkedin_profile?.given_name, user?.linkedin_profile?.family_name].filter(Boolean).join(" ").trim();
+  const profileEmail = contactEmail(user?.email) || contactEmail(user?.linkedin_profile?.email);
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -856,15 +863,15 @@ export function ApplyPage() {
   } = useForm<ApplicationFields>({
     resolver: zodResolver(applicationSchema),
     defaultValues: {
-      candidate_name: user?.name || "",
-      email: user?.email || "",
+      candidate_name: profileName,
+      email: profileEmail,
       phone: "",
       linkedin_url: "",
       consent: false,
     },
   });
   useEffect(() => {
-    const profile = { candidate_name: user?.name, email: user?.email };
+    const profile = { candidate_name: profileName, email: profileEmail };
     for (const key of ["candidate_name", "email"] as const) {
       const state = getFieldState(key);
       if (
@@ -876,7 +883,7 @@ export function ApplyPage() {
         setValue(key, profile[key]);
       }
     }
-  }, [user?.name, user?.email, getFieldState, setValue]);
+  }, [profileName, profileEmail, getFieldState, setValue]);
   const nameField = register("candidate_name");
   const emailField = register("email");
   function selectFile(value: File | null) {
@@ -991,6 +998,9 @@ export function ApplyPage() {
           onSubmit={handleSubmit(submit)}
           noValidate
         >
+          {user?.linkedin_profile && (
+            <LinkedInProfileSummary profile={user.linkedin_profile} />
+          )}
           <div className="form-section-title">
             <span>01</span>
             <div>

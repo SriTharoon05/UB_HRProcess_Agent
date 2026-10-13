@@ -17,7 +17,7 @@ import msal
 from pydantic import ValidationError
 
 from app.errors import ConfigurationError, IntegrationError
-from app.models import Candidate, Evaluation, Job, User
+from app.models import Candidate, Evaluation, Job, LinkedInProfile, User
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,8 @@ REQUEST_FIELDS = {
     "linkedin_issuer": "LinkedInIssuer", "linkedin_sub": "LinkedInSub",
     "owner_issuer": "LinkedInIssuer", "owner_sub": "LinkedInSub",
     "full_name": "FullName", "candidate_name": "FullName", "email": "Email",
-    "phone": "Phone", "linkedin_url": "LinkedInUrl", "resume_file_name": "ResumeFileName",
+    "phone": "Phone", "linkedin_url": "LinkedInUrl", "linkedin_profile": "LinkedInProfileJson",
+    "resume_file_name": "ResumeFileName",
     "resume_ref": "ResumeBlobKey", "resume_blob_key": "ResumeBlobKey",
     "resume_sha256": "ResumeSha256", "consent_version": "ConsentVersion",
     "consent_date": "ConsentDateTime", "consent_date_time": "ConsentDateTime",
@@ -64,6 +65,7 @@ ALIASES = {
     "full_name": "candidate_name", "matched_skills_json": "matched_requirements",
     "partially_matched_json": "partially_matched_requirements",
     "missing_skills_json": "not_evidenced_requirements", "evidence_json": "relevant_evidence",
+    "linked_in_profile_json": "linkedin_profile", "linkedin_profile_json": "linkedin_profile",
 }
 MEMO_FIELDS = {"matched_requirements", "partially_matched_requirements", "not_evidenced_requirements", "relevant_evidence"}
 
@@ -84,12 +86,13 @@ def normalize(value: Any, field_map: dict[str, str] | None = None) -> Any:
     for external, item in value.items():
         raw_key = snake(external)
         key = reverse.get(external, ALIASES.get(raw_key, raw_key))
-        if key in MEMO_FIELDS or key == "evaluation_criteria":
+        if key in MEMO_FIELDS or key in {"evaluation_criteria", "linkedin_profile"}:
             if isinstance(item, str):
                 try:
                     item = json.loads(item)
                 except (json.JSONDecodeError, TypeError) as exc:
-                    raise IntegrationError("D365 returned malformed evaluation JSON", retryable=False) from exc
+                    category = "profile" if key == "linkedin_profile" else "evaluation"
+                    raise IntegrationError(f"D365 returned malformed {category} JSON", retryable=False) from exc
         result[key] = normalize(item, field_map)
     return result
 
@@ -153,9 +156,17 @@ class D365Service:
             if key in mapping and not mapping[key]:
                 continue
             if hasattr(value, "model_dump"):
-                value = value.model_dump(mode="json")
+                value = value.model_dump(mode="json", exclude_none=key == "linkedin_profile")
             if key in MEMO_FIELDS:
                 value = json.dumps(_pascal_evidence(value), ensure_ascii=False, separators=(",", ":"))
+            elif key == "linkedin_profile":
+                # Preserve standard OIDC keys inside this memo independently of
+                # the PascalCase evaluation evidence schema.
+                try:
+                    profile = LinkedInProfile.model_validate(value)
+                except ValidationError as exc:
+                    raise IntegrationError("Only permitted LinkedIn profile fields can be persisted", retryable=False) from exc
+                value = json.dumps(profile.model_dump(mode="json", exclude_none=True), ensure_ascii=False, separators=(",", ":"))
             mapped[mapping.get(key, key)] = value
         wrappers = getattr(self.settings, "d365_request_wrappers", {})
         default = "" if operation == "get_open_requirements" else self.settings.d365_parameter_name

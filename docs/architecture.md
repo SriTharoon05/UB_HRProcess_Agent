@@ -21,12 +21,14 @@ flowchart LR
 
 ## Submission and evaluation
 
-1. FastAPI validates the backend candidate session, CSRF token, explicit consent, open job, resume type/content, and upload size.
-2. The storage adapter saves the real document privately and computes its SHA-256. The D365 adapter submits identity from the validated OIDC session and document metadata.
+The selected job stays attached to the OAuth authorization attempt. Sign-in returns the candidate to its application form with the permitted LinkedIn profile displayed and available contact fields prefilled. Missing or invalid provider contact details are completed by the candidate before submitting.
+
+1. FastAPI validates the backend candidate session, CSRF token, confirmed contact details, explicit consent, open job, resume type/content, and upload size.
+2. The storage adapter saves the real document privately and computes its SHA-256. The D365 adapter submits identity from the validated OIDC session, the confirmed contacts, optional provider-profile snapshot, and document metadata. Its X++ transaction must upsert the candidate master and save the linked application before returning success.
 3. A confirmed stable D365 `ApplicationId` identifies the queued evaluation. The response confirms submission without waiting for the model.
 4. The worker extracts the complete readable PDF/DOCX text and supplies the complete job context to the Azure OpenAI adapter. The versioned system prompt treats document contents as untrusted data.
 5. Pydantic validates structured model output and resume evidence excerpts. Python does not apply a scoring formula or replace the model score.
-6. The evaluation adapter serializes evidence arrays for X++ memo fields and saves the result through D365. Retried writes require D365-side upsert/idempotency semantics.
+6. The evaluation adapter serializes evidence arrays for X++ memo fields and saves the result through the separate D365 evaluation operation, linked to the confirmed application and requirement. Retried writes require D365-side upsert/idempotency semantics.
 7. HR reads job-specific candidates and detailed evidence through FastAPI. Scores organize the displayed results; a human reviews evidence and makes employment decisions.
 
 ## Storage boundaries

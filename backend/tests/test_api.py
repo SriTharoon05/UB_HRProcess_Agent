@@ -1,12 +1,17 @@
 import asyncio
+import time
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pymupdf
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from joserfc import jwt
+from joserfc.jwk import RSAKey
 
+from app.auth import OIDC
 from app.config import Settings
 from app.main import create_app
 
@@ -275,6 +280,66 @@ def test_demo_forbidden_in_production_and_configured_auth_missing(client):
     assert client.get("/auth/hr/login", follow_redirects=False).status_code == 503
 
 
+def test_linkedin_job_login_callback_returns_to_application_with_safe_public_profile(client, monkeypatch):
+    oidc = OIDC(Settings(_env_file=None, linkedin_client_id="test-client", linkedin_client_secret="test-secret"))
+    monkeypatch.setattr(client.app.state, "oidc", oidc)
+    oauth = oidc.client("linkedin")
+    key = RSAKey.generate_key(2048)
+    key.ensure_kid()
+    oauth.load_server_metadata = AsyncMock(return_value={
+        "issuer": oidc.settings.linkedin_issuer,
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "authorization_endpoint": "https://www.linkedin.com/oauth/v2/authorization",
+    })
+    oauth.fetch_jwk_set = AsyncMock(return_value={"keys": [key.as_dict(private=False)]})
+    destination = "/jobs/REQ-2026-001/apply?source=job#contact"
+    started = client.get("/auth/linkedin/login", params={"return_to": destination}, follow_redirects=False)
+    assert started.status_code == 302
+    initial_session = client.cookies.get("talentmatch_session")
+    params = parse_qs(urlsplit(started.headers["location"]).query)
+    token = jwt.encode({"alg": "RS256", "kid": key.kid}, {
+        "iss": oidc.settings.linkedin_issuer, "sub": "linkedin-user-001", "aud": "test-client",
+        "exp": int(time.time()) + 3600, "iat": int(time.time()), "nonce": params["nonce"][0],
+    }, key)
+    oauth.fetch_access_token = AsyncMock(return_value={
+        "id_token": token, "access_token": "private-access-token", "token_type": "Bearer",
+    })
+    oauth.userinfo = AsyncMock(return_value={
+        "sub": "linkedin-user-001", "name": "Sri Tharoon A S", "given_name": "Sri", "family_name": "Tharoon A S",
+        "email": "urn:li:member:1503054821", "email_verified": True,
+        "picture": "https://media.licdn.com/dms/image/fictional-avatar", "locale": {"language": "en", "country": "IN"},
+        "access_token": "private-access-token", "roles": ["HRRecruiter"], "arbitrary": "private-provider-field",
+    })
+    completed = client.get("/auth/linkedin/callback", params={
+        "code": "single-use-code", "state": params["state"][0], "return_to": "https://evil.test",
+    }, follow_redirects=False)
+    assert completed.status_code == 303, completed.text
+    assert completed.headers["location"] == "http://localhost:5173" + destination
+    assert initial_session != client.cookies.get("talentmatch_session")
+    user = client.get("/api/auth/me").json()["user"]
+    assert user["name"] == "Sri Tharoon A S" and user["email"] == ""
+    assert user["role"] == "candidate"
+    assert user["sub"] == "linkedin-user-001" and user["issuer"] == oidc.settings.linkedin_issuer
+    assert user["linkedin_profile"] == {
+        "sub": "linkedin-user-001", "issuer": oidc.settings.linkedin_issuer,
+        "name": "Sri Tharoon A S", "given_name": "Sri", "family_name": "Tharoon A S",
+        "picture": "https://media.licdn.com/dms/image/fictional-avatar", "locale": "en-IN",
+        "email": None, "email_verified": None,
+    }
+    assert "private-" not in str(user)
+    assert client.get("/api/hr/jobs").status_code == 403
+    replay = client.get("/auth/linkedin/callback", params={"code": "single-use-code", "state": params["state"][0]})
+    assert replay.status_code == 401
+    assert oauth.fetch_access_token.await_count == 1
+
+
+@pytest.mark.parametrize("provider, destination", [("linkedin", "/hr"), ("hr", "/jobs/REQ-001/apply")])
+def test_login_route_rejects_wrong_role_return_destination_before_provider_configuration(client, provider, destination):
+    result = client.get(f"/auth/{provider}/login", params={"return_to": destination}, follow_redirects=False)
+    assert result.status_code == 400
+    assert result.json()["detail"] == "Invalid sign-in return destination"
+
+
 async def test_logout_cannot_be_reversed_by_late_authenticated_get(tmp_path):
     app = create_app(Settings(_env_file=None, local_resume_dir=tmp_path))
     started, release = asyncio.Event(), asyncio.Event()
@@ -304,3 +369,82 @@ async def test_logout_cannot_be_reversed_by_late_authenticated_get(tmp_path):
         session.cookies.clear()
         session.cookies.set("talentmatch_session", old_sid)
         assert (await session.get("/api/auth/me")).json()["user"] is None
+
+
+def test_demo_persists_confirmed_basic_details_and_safe_provider_profile_separately(client, pdf_bytes, monkeypatch):
+    profile = {
+        "sub": "linkedin-user-001", "issuer": "https://www.linkedin.com/oauth",
+        "name": "LinkedIn Applicant", "given_name": "LinkedIn", "family_name": "Applicant",
+        "email": "provider@example.test", "email_verified": False,
+        "picture": "https://media.licdn.com/dms/image/fictional-avatar", "locale": "en-IN",
+    }
+    csrf = login_linkedin(client, monkeypatch, name=profile["name"], email=profile["email"], linkedin_profile=profile)
+    adapter = client.app.state.adapter
+    submitted = AsyncMock(wraps=adapter.submit_application)
+    monkeypatch.setattr(adapter, "submit_application", submitted)
+    result = submit(
+        client, csrf, pdf_bytes, candidate_name="Confirmed Applicant", email="confirmed@example.test",
+        phone="+91 555 0100", linkedin_url="https://www.linkedin.com/in/confirmed-applicant",
+        linkedin_profile='{"access_token":"private-sentinel"}', provider_response="private-sentinel",
+    )
+    assert result.status_code == 200, result.text
+    application_id = result.json()["application_id"]
+    candidate = adapter.candidate_information[(profile["issuer"], profile["sub"])]
+    application = adapter.application_information[application_id]
+    for record in (candidate, application):
+        assert record["candidate_name"] == "Confirmed Applicant" and record["email"] == "confirmed@example.test"
+        assert record["phone"] == "+91 555 0100"
+        assert record["linkedin_url"] == "https://www.linkedin.com/in/confirmed-applicant"
+        assert record["linkedin_profile"] == profile
+        assert record["owner_sub"] == profile["sub"] and record["owner_issuer"] == profile["issuer"]
+        assert record["consent_accepted"] is True and record["consent_version"] == "v1"
+        assert record["consent_date"]
+        assert "private-sentinel" not in str(record) and "evaluation" not in record
+    payload = submitted.call_args.args[0]
+    assert application["requirement_id"] == "REQ-2026-001"
+    assert application["resume_ref"] == payload["resume_ref"]
+    assert application["resume_file_name"] == "resume.pdf" and application["resume_sha256"] == payload["resume_sha256"]
+    assert application["job_description_hash"] == payload["job_description_hash"]
+    assert adapter.records[application_id].evaluation is not None
+    assert client.get(f"/api/applications/{application_id}").json()["demo_fixture"] is True
+    payload["linkedin_profile"]["name"] = "Changed request object"
+    assert candidate["linkedin_profile"]["name"] == application["linkedin_profile"]["name"] == "LinkedIn Applicant"
+
+
+def test_demo_upserts_one_candidate_but_preserves_each_job_application_contact_snapshot(client, pdf_bytes, monkeypatch):
+    first_profile = {
+        "sub": "linkedin-user-001", "issuer": "https://www.linkedin.com/oauth",
+        "name": "First LinkedIn Name", "email": "first-provider@example.test",
+    }
+    csrf = login_linkedin(client, monkeypatch, linkedin_profile=first_profile)
+    first = submit(
+        client, csrf, pdf_bytes, key="profile-snapshot-001", candidate_name="First Confirmed Name",
+        email="first-confirmed@example.test", phone="+91 555 0101", linkedin_url="https://www.linkedin.com/in/first",
+    )
+    assert first.status_code == 200, first.text
+    first_id = first.json()["application_id"]
+    second_profile = {**first_profile, "name": "Updated LinkedIn Name", "email": "updated-provider@example.test"}
+    csrf = login_linkedin(client, monkeypatch, linkedin_profile=second_profile)
+    second = submit(
+        client, csrf, pdf_bytes, key="profile-snapshot-002", requirement_id="REQ-2026-005",
+        candidate_name="Updated Confirmed Name", email="updated-confirmed@example.test", phone="+91 555 0102",
+        linkedin_url="https://www.linkedin.com/in/updated",
+    )
+    assert second.status_code == 200, second.text
+    second_id = second.json()["application_id"]
+    adapter = client.app.state.adapter
+    assert len(adapter.candidate_information) == 1 and len(adapter.application_information) == 2
+    previous = adapter.application_information[first_id]
+    current = adapter.application_information[second_id]
+    master = adapter.candidate_information[(first_profile["issuer"], first_profile["sub"])]
+    assert previous["candidate_id"] == current["candidate_id"] == master["candidate_id"]
+    assert previous["candidate_name"] == "First Confirmed Name" and previous["email"] == "first-confirmed@example.test"
+    assert previous["phone"] == "+91 555 0101" and previous["linkedin_url"] == "https://www.linkedin.com/in/first"
+    assert previous["linkedin_profile"] == first_profile and previous["requirement_id"] == "REQ-2026-001"
+    assert current["candidate_name"] == master["candidate_name"] == "Updated Confirmed Name"
+    assert current["email"] == master["email"] == "updated-confirmed@example.test"
+    assert current["phone"] == master["phone"] == "+91 555 0102"
+    assert current["linkedin_profile"] == master["linkedin_profile"] == second_profile
+    assert current["requirement_id"] == "REQ-2026-005" and previous["resume_ref"] != current["resume_ref"]
+    own = client.get(f"/api/applications/{first_id}").json()
+    assert own["candidate_name"] == "First Confirmed Name" and own["email"] == "first-confirmed@example.test"

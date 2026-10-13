@@ -1,9 +1,21 @@
+export interface LinkedInProfile {
+  sub: string;
+  issuer: string;
+  name?: string | null;
+  given_name?: string | null;
+  family_name?: string | null;
+  email?: string | null;
+  email_verified?: boolean | null;
+  picture?: string | null;
+  locale?: string | null;
+}
 export interface User {
   sub: string;
   name: string;
   email: string;
   role: "candidate" | "hr";
   issuer: string;
+  linkedin_profile?: LinkedInProfile | null;
 }
 export interface AuthSession {
   user: User | null;
