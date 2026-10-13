@@ -1,9 +1,12 @@
 import json
+import logging
 import secrets
 from http.cookies import SimpleCookie
 from typing import Literal
 
 from authlib.integrations.starlette_client import OAuth
+from authlib.integrations.starlette_client.apps import StarletteOAuth2App
+from authlib.oidc.core import CodeIDToken
 from fastapi import HTTPException, Request
 from redis.asyncio import Redis
 from starlette.responses import JSONResponse
@@ -11,6 +14,26 @@ from starlette.responses import JSONResponse
 from app.config import Settings
 from app.errors import ConfigurationError
 from app.models import User
+
+
+class LinkedInCodeIDToken(CodeIDToken):
+    """LinkedIn may omit nonce in its authorization-code ID tokens."""
+
+    def validate_nonce(self):
+        if "nonce" in self:
+            super().validate_nonce()
+
+
+class LinkedInOAuthApp(StarletteOAuth2App):
+    async def parse_id_token(self, token, nonce, claims_options=None, claims_cls=None, leeway=120):
+        def linkedin_claims(claims, header, options, params):
+            # Authlib does not inject access_token when a custom claims class is
+            # supplied. Preserve at_hash verification as well as all JWT checks.
+            return LinkedInCodeIDToken(claims, header, options, {**params, "access_token": token.get("access_token")})
+
+        return await super().parse_id_token(
+            token, nonce, claims_options=claims_options, claims_cls=linkedin_claims, leeway=leeway
+        )
 
 
 class SessionStore:
@@ -192,7 +215,8 @@ class OIDC:
                 client_id=settings.linkedin_client_id,
                 client_secret=settings.linkedin_client_secret,
                 server_metadata_url=settings.linkedin_discovery_url,
-                client_kwargs={"scope": "openid profile email"},
+                client_cls=LinkedInOAuthApp,
+                client_kwargs={"scope": "openid profile email", "token_endpoint_auth_method": "client_secret_post"},
             )
         if settings.entra_tenant_id and settings.entra_client_id and settings.entra_client_secret:
             self.oauth.register(
@@ -252,16 +276,46 @@ class OIDC:
             if not state_data or not state_data.get("nonce"):
                 raise HTTPException(401, "Authentication state is missing or expired")
             token = await client.authorize_access_token(
-                request, claims_options={"iss": {"essential": True, "value": issuer}}
+                request,
+                claims_options={
+                    "iss": {"essential": True, "value": issuer},
+                    "aud": {"essential": True, "value": client.client_id},
+                },
             )
             if "id_token" not in token or not token.get("userinfo"):
                 raise HTTPException(401, "OIDC identity token is required")
-            if not secrets.compare_digest(str(token["userinfo"].get("nonce", "")), state_data["nonce"]):
+            claims = dict(token["userinfo"])
+            # LinkedIn omits nonce in some code-flow tokens. When present it
+            # must still match, even if a token claims nonce_supported=false.
+            if (provider != "linkedin" or "nonce" in claims) and not secrets.compare_digest(
+                str(claims.get("nonce", "")), state_data["nonce"]
+            ):
                 raise HTTPException(401, "Invalid identity nonce")
-            user = self.identity(dict(token["userinfo"]), provider)
+            if provider == "linkedin":
+                profile = await client.userinfo(token=token)
+                if not isinstance(profile.get("sub"), str) or not profile["sub"] or profile["sub"] != claims.get("sub"):
+                    raise HTTPException(401, "LinkedIn profile does not match the identity token")
+                # The profile response cannot replace validated token claims.
+                claims.update({field: profile.get(field) for field in ("name", "email", "email_verified")})
+            user = self.identity(claims, provider)
         except HTTPException:
             raise
-        except Exception:
+        except Exception as exc:
+            oauth_error = getattr(exc, "error", "")
+            if not isinstance(oauth_error, str) or oauth_error not in {
+                "invalid_client", "invalid_grant", "invalid_scope", "unauthorized_client",
+                "access_denied", "invalid_request",
+            }:
+                oauth_error = "unclassified"
+            claim = getattr(exc, "claim_name", getattr(exc, "claim", ""))
+            if not isinstance(claim, str) or claim not in {
+                "iss", "aud", "exp", "iat", "nbf", "nonce", "azp", "at_hash", "sub",
+            }:
+                claim = "-"
+            logging.getLogger("uvicorn.error").warning(
+                "OIDC callback failure: provider=%s type=%s error=%s claim=%s",
+                provider, type(exc).__name__, oauth_error, claim,
+            )
             raise HTTPException(401, "Authentication callback could not be validated") from None
         request.session.clear()
         request.session.update(user=user.model_dump(), csrf_token=secrets.token_urlsafe(32))

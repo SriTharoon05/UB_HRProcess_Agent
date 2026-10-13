@@ -3,7 +3,8 @@
 | Check | Result |
 | --- | --- |
 | `scripts/install.sh` | Locked uv installation and clean `npm ci` passed using writable local caches |
-| Backend pytest | 57 passed, including 6 tests against a real Redis instance |
+| Backend pytest | 88 passed, including 6 tests against a real Redis instance |
+| LinkedIn and Entra authentication regressions | 40 passed, including LinkedIn tokens without nonce, profile subject binding, strict Entra nonce validation, access-token hashes, and safe diagnostics |
 | Backend Ruff | Passed |
 | Frontend Vitest | 39 passed across 4 test files |
 | Frontend ESLint and TypeScript | Passed |

@@ -18,9 +18,11 @@ The localhost URI is a local example. Enter the **exact** redirect URI already r
 
 The application requests the fixed required scopes `openid profile email`. There is no configurable scope variable that pretends to enable extra LinkedIn data. Those scopes provide basic identity only; phone numbers, profile URLs, employment history, projects, and skills are not guaranteed. Optional contact information comes from the application form; work evidence comes from the uploaded resume.
 
-Authlib performs the authorization-code exchange and OIDC token validation using provider discovery/JWKS, the registered audience, expiry, state, and nonce. The backend additionally requires the configured issuer, a non-empty subject, profile name, email, and LinkedIn `email_verified=true`. It identifies the candidate by issuer/subject. If a valid permitted identity does not supply the required verified profile claims, the callback fails visibly rather than creating an assumed identity.
+Authlib performs the authorization-code exchange using `client_secret_post` and validates the ID token's signature through provider discovery/JWKS, the configured issuer, registered audience, expiry, and any access-token hash. LinkedIn may omit `nonce` from authorization-code ID tokens. A LinkedIn-specific claims validator allows only that omission; any returned nonce must match the session challenge. Session-bound OAuth state and the single-use backend code exchange remain required. Microsoft Entra still requires a matching nonce.
 
-State and nonce are kept in the backend session. An invalid, replayed, or unverifiable callback fails; raw token responses are not logged. On successful login the backend rotates the opaque session identifier and CSRF token. The browser returns to the candidate application workspace.
+After validating the ID token, the backend retrieves LinkedIn's user-info response and requires its subject to exactly match the signed token's subject. Only profile name, email, and `email_verified` are copied; user-info cannot replace validated token claims. The backend requires `email_verified=true` and identifies the candidate by the validated issuer/subject. Missing or inconsistent profile data fails visibly rather than creating an assumed identity.
+
+State and the nonce challenge are kept in the backend session. An invalid, replayed, or unverifiable callback fails; raw token responses are not logged. Callback diagnostics contain only the provider, exception class, and allowlisted error/claim identifiers. On successful login the backend rotates the opaque session identifier and CSRF token. The browser returns to the candidate application workspace.
 
 ## Microsoft Entra HR users
 
@@ -56,6 +58,8 @@ Cookies contain an unpredictable random session identifier, not identity claims 
 | Provider configuration error | Backend client ID/secret and Entra tenant are present; restart after configuration changes |
 | Redirect mismatch | Registered URI equals the externally visible configured callback exactly |
 | Invalid callback/state | Login and callback use the same browser cookie, Redis session, host, and HTTPS/proxy setup |
+| `MissingClaimError` for LinkedIn `nonce` | Update the backend to the LinkedIn code-flow compatibility fix; restart and begin a fresh login |
+| Generic callback 401 | Read the sanitized `OIDC callback failure` line in backend logs; never share token responses or credentials |
 | HR forbidden | Correct tenant token and assigned allowed application role are present |
 | Missing LinkedIn profile | OIDC product/scopes enabled and required verified name/email claims returned |
 | Session service unavailable | Connected API can reach its private Redis instance and persist sessions |
