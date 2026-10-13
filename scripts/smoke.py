@@ -57,6 +57,8 @@ def main():
         expect(page.get_by_text("Demo workspace", exact=True).first).to_be_visible()
         page.goto(f"{base}/jobs/{requirement_id}")
         page.get_by_role("link", name="Apply now", exact=True).first.click()
+        page.get_by_role("textbox", name="Full name", exact=True).fill("Avery Sample")
+        page.get_by_role("textbox", name="Email address", exact=True).fill("avery@example.test")
         page.get_by_test_id("resume-input").set_input_files(str(resume_path))
         page.get_by_test_id("application-consent").check()
         with page.expect_response(
@@ -77,6 +79,7 @@ def main():
             if item["application_id"] == application_id
         )
         assert application["requirement_id"] == requirement_id and application["resume_file_name"] == resume_path.name
+        assert application["candidate_name"] == "Avery Sample" and application["email"] == "avery@example.test"
         assert "evaluation" not in application, "Candidate responses must omit internal AI analysis"
         page.goto(f"{base}/candidate/applications")
         expect(page.get_by_text(application_id, exact=False).first).to_be_visible()
@@ -111,6 +114,7 @@ def main():
                         "job listing",
                         "demo login",
                         "PDF form upload",
+                        "application contact capture",
                         "application history",
                         "HR authorization",
                         "candidate evidence",

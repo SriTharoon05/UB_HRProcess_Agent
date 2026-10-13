@@ -167,6 +167,9 @@ class SubmissionCoordinator:
                     await lock.release()
 
 
-def submission_fingerprint(requirement_id, data, phone, linkedin_url, consent_version):
-    metadata = json.dumps([requirement_id, phone, linkedin_url, consent_version], separators=(",", ":"))
+def submission_fingerprint(requirement_id, data, phone, linkedin_url, consent_version, *, candidate_name=None, email=None):
+    fields = [requirement_id, phone, linkedin_url, consent_version]
+    if candidate_name is not None or email is not None:
+        fields.extend([candidate_name, email])
+    metadata = json.dumps(fields, separators=(",", ":"))
     return hashlib.sha256(metadata.encode() + b"\0" + data).hexdigest()

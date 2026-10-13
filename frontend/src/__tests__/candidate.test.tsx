@@ -2,9 +2,10 @@ import {act, fireEvent, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {api} from '../lib/api';
-import type {Job, SubmissionResult} from '../lib/types';
+import type {AuthSession, Job, SubmissionResult} from '../lib/types';
+import {AppShell} from '../components/app-shell';
 import {ApplicationDetailPage, ApplicationsPage, ApplyPage, JobDetailsPage, JobsPage} from '../pages/candidate';
-import {engineeringJob, highCandidate, jobs, pendingCandidate, session} from './fixtures';
+import {candidateUser, engineeringJob, highCandidate, jobs, pendingCandidate, session} from './fixtures';
 import {deferred, mockApi, renderPage} from './helpers';
 
 beforeEach(mockApi);
@@ -71,7 +72,7 @@ function renderApply() {
 }
 async function readyForm() {
   await screen.findByRole('heading', {name: 'Make your next move.'});
-  // Auth and job requests are independent; wait until the verified profile arrives.
+  // Auth and job requests are independent; wait until profile prefilling finishes.
   await waitFor(() => expect(screen.getByRole('textbox', {name: 'Full name'})).toHaveValue('Alex Sample'));
 }
 async function attachResume() {
@@ -79,13 +80,91 @@ async function attachResume() {
 }
 
 describe('candidate application submission', () => {
-  it('keeps verified identity read-only and blocks submission without informed consent', async () => {
+  it('prefills editable application contact details and blocks submission without informed consent', async () => {
     renderApply(); await readyForm(); await attachResume();
-    expect(screen.getByRole('textbox', {name: 'Full name'})).toHaveAttribute('readonly');
+    expect(screen.getByRole('textbox', {name: 'Full name'})).not.toHaveAttribute('readonly');
+    expect(screen.getByRole('textbox', {name: 'Email address'})).not.toHaveAttribute('readonly');
     expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('alex@example.test');
     await userEvent.click(screen.getByRole('button', {name: 'Submit application'}));
     expect(await screen.findByRole('alert')).toHaveTextContent('Please accept the privacy consent to continue.');
     expect(api.submit).not.toHaveBeenCalled();
+  });
+
+  it('lets a signed-in candidate provide missing profile information and submits trimmed application contact details', async () => {
+    vi.mocked(api.session).mockResolvedValue(session({...candidateUser, name: '', email: ''}));
+    renderApply();
+    await screen.findByRole('heading', {name: 'Make your next move.'});
+    expect(screen.getByRole('textbox', {name: 'Full name'})).toHaveValue('');
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('');
+    await userEvent.type(screen.getByRole('textbox', {name: 'Full name'}), '  Jamie Applicant  ');
+    await userEvent.type(screen.getByRole('textbox', {name: 'Email address'}), '  jamie@example.test  ');
+    await attachResume();
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', {name: 'Submit application'}));
+    expect(await screen.findByTestId('application-success')).toBeVisible();
+    const body = vi.mocked(api.submit).mock.calls[0][0];
+    expect(body.get('candidate_name')).toBe('Jamie Applicant');
+    expect(body.get('email')).toBe('jamie@example.test');
+  });
+
+  it('requires a full name and contact email when LinkedIn omits them', async () => {
+    vi.mocked(api.session).mockResolvedValue(session({...candidateUser, name: '', email: ''}));
+    renderApply();
+    await screen.findByRole('heading', {name: 'Make your next move.'});
+    await userEvent.type(screen.getByRole('textbox', {name: 'Full name'}), '   ');
+    await attachResume();
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', {name: 'Submit application'}));
+    expect(await screen.findByText('Enter your full name.')).toBeVisible();
+    expect(screen.getByText('Enter your contact email.')).toBeVisible();
+    expect(api.submit).not.toHaveBeenCalled();
+  });
+
+  it('validates an edited contact email before transmitting the application', async () => {
+    renderApply(); await readyForm(); await attachResume();
+    await userEvent.clear(screen.getByRole('textbox', {name: 'Email address'}));
+    await userEvent.type(screen.getByRole('textbox', {name: 'Email address'}), 'invalid-email');
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', {name: 'Submit application'}));
+    expect(await screen.findByText('Enter a valid email address.')).toBeVisible();
+    expect(api.submit).not.toHaveBeenCalled();
+  });
+
+  it('prefills untouched contact fields when the session arrives after the job', async () => {
+    const request = deferred<AuthSession>();
+    vi.mocked(api.session).mockReturnValueOnce(request.promise);
+    renderApply();
+    await screen.findByRole('heading', {name: 'Make your next move.'});
+    expect(screen.getByRole('textbox', {name: 'Full name'})).toHaveValue('');
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('');
+    await act(async () => request.resolve(session()));
+    await waitFor(() => expect(screen.getByRole('textbox', {name: 'Full name'})).toHaveValue('Alex Sample'));
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('alex@example.test');
+  });
+
+  it('preserves edited contact details when the session arrives later', async () => {
+    const request = deferred<AuthSession>();
+    vi.mocked(api.session).mockReturnValueOnce(request.promise);
+    renderApply();
+    await screen.findByRole('heading', {name: 'Make your next move.'});
+    await userEvent.type(screen.getByRole('textbox', {name: 'Full name'}), 'Jamie Applicant');
+    await userEvent.type(screen.getByRole('textbox', {name: 'Email address'}), 'jamie@example.test');
+    await act(async () => request.resolve(session()));
+    await screen.findByText(/Consent version v1/);
+    expect(screen.getByRole('textbox', {name: 'Full name'})).toHaveValue('Jamie Applicant');
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('jamie@example.test');
+  });
+
+  it('does not refill a contact field that was typed into and then cleared while awaiting the session', async () => {
+    const request = deferred<AuthSession>();
+    vi.mocked(api.session).mockReturnValueOnce(request.promise);
+    renderApply();
+    await screen.findByRole('heading', {name: 'Make your next move.'});
+    await userEvent.type(screen.getByRole('textbox', {name: 'Full name'}), 'Jamie Applicant');
+    await userEvent.clear(screen.getByRole('textbox', {name: 'Full name'}));
+    await act(async () => request.resolve(session()));
+    await waitFor(() => expect(screen.getByRole('textbox', {name: 'Email address'})).toHaveValue('alex@example.test'));
+    expect(screen.getByRole('textbox', {name: 'Full name'})).toHaveValue('');
   });
 
   it('requires a resume even after consent is accepted', async () => {
@@ -128,12 +207,16 @@ describe('candidate application submission', () => {
     await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
     const [body, idempotencyKey] = vi.mocked(api.submit).mock.calls[0];
     expect(body.get('requirement_id')).toBe(engineeringJob.requirement_id);
+    expect(body.get('candidate_name')).toBe('Alex Sample');
+    expect(body.get('email')).toBe('alex@example.test');
     expect(body.get('resume')).toBeInstanceOf(File);
     expect(body.get('phone')).toBe('+91 9876543210');
     expect(body.get('consent_accepted')).toBe('true');
     expect(body.get('consent_version')).toBe('v1');
     expect(idempotencyKey).toMatch(/^[\da-f]{8}-[\da-f-]{27}$/i);
     expect(screen.getByTestId('submit-application')).toBeDisabled();
+    expect(screen.getByRole('textbox', {name: 'Full name'})).toBeDisabled();
+    expect(screen.getByRole('textbox', {name: 'Email address'})).toBeDisabled();
     expect(screen.getByLabelText('Upload resume')).toBeDisabled();
     await act(async () => request.resolve({success: true, application_id: 'TEST-CONFIRMED-007', ai_status: 'queued', message: 'Application safely received.'}));
     expect(await screen.findByTestId('application-success')).toHaveTextContent('Application safely received.');
@@ -168,6 +251,20 @@ describe('candidate application submission', () => {
 });
 
 describe('candidate status visibility', () => {
+  it('uses a complete greeting when the signed-in candidate has no profile name', async () => {
+    vi.mocked(api.session).mockResolvedValue(session({...candidateUser, name: '', email: ''}));
+    renderPage(<ApplicationsPage />);
+    await screen.findByRole('row', {name: /Frontend Engineer/});
+    expect(screen.getByRole('heading', {name: 'Your story, in motion.'})).toBeVisible();
+  });
+
+  it('displays a generic candidate label in the header when the profile name is missing', async () => {
+    vi.mocked(api.session).mockResolvedValue(session({...candidateUser, name: '', email: ''}));
+    const {container} = renderPage(<AppShell />);
+    await waitFor(() => expect(container.querySelector('.user-chip strong')).toHaveTextContent('Candidate'));
+    expect(container.querySelector('.user-chip .avatar')).toHaveTextContent('C');
+  });
+
   it('links application records and separates application status from AI processing', async () => {
     vi.mocked(api.applications).mockResolvedValue([pendingCandidate]);
     renderPage(<ApplicationsPage />);

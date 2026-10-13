@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import {
   Link,
   useLocation,
@@ -785,6 +785,17 @@ export function LoginPage({ hr = false }: { hr?: boolean }) {
 }
 
 const applicationSchema = z.object({
+  candidate_name: z
+    .string()
+    .trim()
+    .min(1, "Enter your full name.")
+    .max(200, "Use a full name of 200 characters or fewer."),
+  email: z
+    .string()
+    .trim()
+    .min(1, "Enter your contact email.")
+    .max(320, "Use an email address of 320 characters or fewer.")
+    .email("Enter a valid email address."),
   phone: z
     .string()
     .trim()
@@ -835,14 +846,39 @@ export function ApplyPage() {
     message: string;
   } | null>(null);
   const [submissionKey] = useState(() => crypto.randomUUID());
+  const contactEdited = useRef({ candidate_name: false, email: false });
   const {
     register,
     handleSubmit,
+    getFieldState,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<ApplicationFields>({
     resolver: zodResolver(applicationSchema),
-    defaultValues: { phone: "", linkedin_url: "", consent: false },
+    defaultValues: {
+      candidate_name: user?.name || "",
+      email: user?.email || "",
+      phone: "",
+      linkedin_url: "",
+      consent: false,
+    },
   });
+  useEffect(() => {
+    const profile = { candidate_name: user?.name, email: user?.email };
+    for (const key of ["candidate_name", "email"] as const) {
+      const state = getFieldState(key);
+      if (
+        profile[key] &&
+        !contactEdited.current[key] &&
+        !state.isDirty &&
+        !state.isTouched
+      ) {
+        setValue(key, profile[key]);
+      }
+    }
+  }, [user?.name, user?.email, getFieldState, setValue]);
+  const nameField = register("candidate_name");
+  const emailField = register("email");
   function selectFile(value: File | null) {
     setFileError(validateResume(value));
     setFile(value);
@@ -859,6 +895,8 @@ export function ApplyPage() {
     setSubmitError(null);
     const data = new FormData();
     data.set("requirement_id", requirementId);
+    data.set("candidate_name", values.candidate_name);
+    data.set("email", values.email);
     data.set("resume", file);
     data.set("phone", values.phone);
     data.set("linkedin_url", values.linkedin_url);
@@ -957,7 +995,7 @@ export function ApplyPage() {
             <span>01</span>
             <div>
               <h2>A little about you</h2>
-              <p>Your details come from your signed-in profile.</p>
+              <p>Confirm your name and contact email for this application.</p>
             </div>
           </div>
           <div className="form-grid">
@@ -965,23 +1003,38 @@ export function ApplyPage() {
               <label htmlFor="candidate-name">Full name</label>
               <input
                 id="candidate-name"
-                value={user?.name || ""}
-                readOnly
-                aria-readonly="true"
+                autoComplete="name"
+                disabled={isSubmitting}
+                {...nameField}
+                onChange={(event) => {
+                  contactEdited.current.candidate_name = true;
+                  void nameField.onChange(event);
+                }}
+                aria-invalid={Boolean(errors.candidate_name)}
               />
-              <span className="field-note">
-                <ShieldCheck size={11} />
-                From your verified profile
-              </span>
+              {errors.candidate_name && (
+                <span className="field-error">
+                  {errors.candidate_name.message}
+                </span>
+              )}
             </div>
             <div className="form-field">
               <label htmlFor="candidate-email">Email address</label>
               <input
                 id="candidate-email"
-                value={user?.email || ""}
-                readOnly
-                aria-readonly="true"
+                type="email"
+                autoComplete="email"
+                disabled={isSubmitting}
+                {...emailField}
+                onChange={(event) => {
+                  contactEdited.current.email = true;
+                  void emailField.onChange(event);
+                }}
+                aria-invalid={Boolean(errors.email)}
               />
+              {errors.email && (
+                <span className="field-error">{errors.email.message}</span>
+              )}
             </div>
             <div className="form-field">
               <label htmlFor="phone">
@@ -1216,6 +1269,7 @@ export function ApplyPage() {
 
 export function ApplicationsPage() {
   const { session } = useAuth();
+  const firstName = session?.user?.name.trim().split(/\s+/)[0];
   const query = useQuery({
     queryKey: ["applications"],
     queryFn: api.applications,
@@ -1232,7 +1286,7 @@ export function ApplicationsPage() {
     <div className="page">
       <PageHeading
         eyebrow="YOUR CANDIDATE WORKSPACE"
-        title={`Your story, in motion${session?.user ? `, ${session.user.name.split(" ")[0]}` : ""}.`}
+        title={`Your story, in motion${firstName ? `, ${firstName}` : ""}.`}
         description="Every application is the beginning of a possibility. Follow yours here."
         action={
           <Button asChild variant="secondary">

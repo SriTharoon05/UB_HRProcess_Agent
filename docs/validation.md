@@ -3,10 +3,10 @@
 | Check | Result |
 | --- | --- |
 | `scripts/install.sh` | Locked uv installation and clean `npm ci` passed using writable local caches |
-| Backend pytest | 88 passed, including 6 tests against a real Redis instance |
-| LinkedIn and Entra authentication regressions | 40 passed, including LinkedIn tokens without nonce, profile subject binding, strict Entra nonce validation, access-token hashes, and safe diagnostics |
+| Backend pytest | 121 passed, including 6 tests against a real Redis instance |
+| LinkedIn and Entra authentication regressions | 51 passed, including optional LinkedIn contact fields, tokens without nonce, profile subject binding, strict Entra nonce validation, access-token hashes, and safe diagnostics |
 | Backend Ruff | Passed |
-| Frontend Vitest | 39 passed across 4 test files |
+| Frontend Vitest | 47 passed across 4 test files |
 | Frontend ESLint and TypeScript | Passed |
 | Vite production build | Passed; candidate and HR screens load in separate chunks |
 | Backend and frontend Docker builds | Passed; Python 3.12 and Node 22 build environments |
@@ -14,7 +14,7 @@
 | Visual checks | Desktop 1440px and mobile 390px; navigation works and tables scroll within their containers |
 | Saved startup commands | Services stopped and restarted successfully through `scripts/dev.sh` |
 
-The browser scenario submits a newly generated PDF through the candidate application form, verifies its current application identifier and candidate history, checks candidate-to-HR access denial, switches to HR, opens the evaluation, and downloads the exact original PDF. It also checks mobile layout and browser exceptions. Sample evaluations remain labeled fictional fixtures.
+The browser scenario submits a newly generated PDF through the candidate application form, verifies its entered contact name/email, current application identifier and candidate history, checks candidate-to-HR access denial, switches to HR, opens the evaluation, and downloads the exact original PDF. It also checks mobile layout and browser exceptions. Sample evaluations remain labeled fictional fixtures. The contact-field regression was rerun against the development services; container smoke checks were performed during the initial build.
 
 Backend tests validate signed OIDC tokens, state/nonce/issuer/audience/expiry handling, roles, CSRF, ownership, session revocation races, upload validation, real document extraction, D365 mappings, AI output/evidence validation, and durable queue recovery. External D365, identity-provider, Azure OpenAI, and Blob calls are mocked. Real Redis tests verify queue retention, recovery, cached evaluation retries, idempotency, and session updates.
 

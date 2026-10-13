@@ -251,14 +251,25 @@ class OIDC:
             allowed = {*self.settings.hr_allowed_roles, self.settings.entra_hr_role}
             if claims.get("tid") != self.settings.entra_tenant_id or not allowed.intersection(claims.get("roles", [])):
                 raise HTTPException(403, "The configured HR application role is required")
+        name = claims.get("name")
         email = claims.get("email") or (claims.get("preferred_username") if provider == "hr" else None)
-        if not email or not claims.get("name"):
+        if provider == "linkedin":
+            # LinkedIn profile/contact claims are optional. Authentication is
+            # bound to the validated issuer/subject; the application form
+            # collects required contact details rather than inventing them.
+            name = name.strip() if isinstance(name, str) else ""
+            if not name:
+                name = " ".join(
+                    value.strip()
+                    for field in ("given_name", "family_name")
+                    if isinstance(value := claims.get(field), str) and value.strip()
+                )
+            email = email.strip() if isinstance(email, str) else ""
+        elif not name or not email:
             raise HTTPException(401, "Identity is missing required profile information")
-        if provider == "linkedin" and claims.get("email_verified") is not True:
-            raise HTTPException(401, "A verified LinkedIn email address is required")
         return User(
             sub=claims["sub"],
-            name=claims["name"],
+            name=name,
             email=email,
             issuer=issuer,
             role="candidate" if provider == "linkedin" else "hr",
@@ -296,7 +307,13 @@ class OIDC:
                 if not isinstance(profile.get("sub"), str) or not profile["sub"] or profile["sub"] != claims.get("sub"):
                     raise HTTPException(401, "LinkedIn profile does not match the identity token")
                 # The profile response cannot replace validated token claims.
-                claims.update({field: profile.get(field) for field in ("name", "email", "email_verified")})
+                claims.update(
+                    {
+                        field: profile[field]
+                        for field in ("name", "given_name", "family_name", "email", "email_verified")
+                        if profile.get(field) is not None
+                    }
+                )
             user = self.identity(claims, provider)
         except HTTPException:
             raise

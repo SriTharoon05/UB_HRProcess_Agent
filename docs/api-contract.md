@@ -2,6 +2,8 @@
 
 All frontend requests use same-origin `/api` and `/auth` (Vite proxies to port 8000), credentials included. JSON uses snake_case. API errors use `{detail: string}`. No secrets in frontend.
 
+For a LinkedIn user, `User.name` and `User.email` can be empty strings when the provider does not supply them. Sign-in and ownership use the validated issuer/subject. The application form collects the required contact details before submission.
+
 - `GET /api/health` -> `{status: "ok", demo_mode: boolean, app_name: string}`
 - `GET /api/auth/me` -> `{user: User|null, csrf_token: string, demo_mode: boolean, consent_version: string}`. Mutations send `X-CSRF-Token`.
 - `POST /api/auth/demo` JSON `{role: "candidate"|"hr"}` -> auth response; requires CSRF, development demo only.
@@ -9,7 +11,7 @@ All frontend requests use same-origin `/api` and `/auth` (Vite proxies to port 8
 - `/auth/linkedin/login`, `/auth/hr/login` -> OIDC redirect. Callback redirects to frontend candidate applications or /hr.
 - `GET /api/jobs` and HR `/api/hr/jobs` -> `Job[]`; query `search`, `department`, `location`, `work_mode`, `employment_type` supported.
 - `GET /api/jobs/{requirement_id}` -> `Job`.
-- `POST /api/applications`: multipart `requirement_id`, `resume` PDF/DOCX, `phone`, `linkedin_url`, `consent_accepted=true`, `consent_version` from the current auth response (default `v1`). `Idempotency-Key` stable per form submission. -> `{success:true, application_id:string, ai_status:string, message:string}`.
+- `POST /api/applications`: multipart `requirement_id`, `candidate_name`, `email`, `resume` PDF/DOCX, `phone`, `linkedin_url`, `consent_accepted=true`, `consent_version` from the current auth response (default `v1`). Full name and valid contact email are required before storing/submitting the resume. Older clients may omit contact fields only when complete contact data is already available in the session. Contact input cannot change the authenticated issuer, subject, or role. `Idempotency-Key` is stable per form submission; changing effective contact details with the same key returns 409. -> `{success:true, application_id:string, ai_status:string, message:string}`.
 - `GET /api/me/applications` -> `Application[]`; `GET /api/applications/{id}` -> own Application. Never include internal evaluation in candidate responses.
 - `GET /api/hr/jobs/{requirement_id}/candidates` -> `{candidates:Candidate[], limit:number, returned_count:number}` (default limit 25, not total population).
 - `GET /api/hr/jobs/{requirement_id}/candidates/{application_id}` -> `Candidate`.

@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import AsyncMock
 
 import httpx
 import pymupdf
@@ -34,6 +35,30 @@ def login(client, role="candidate"):
     result = client.post("/api/auth/demo", json={"role": role}, headers={"X-CSRF-Token": auth["csrf_token"]})
     assert result.status_code == 200, result.text
     return result.json()["csrf_token"]
+
+
+def login_linkedin(client, monkeypatch, **profile_fields):
+    profile = {
+        "sub": "linkedin-user-001",
+        "issuer": "https://www.linkedin.com/oauth",
+        "role": "candidate",
+        "name": "",
+        "email": "",
+        **profile_fields,
+    }
+
+    async def callback(request, provider):
+        assert provider == "linkedin"
+        request.session.clear()
+        request.session.update(user=profile, csrf_token="test-linkedin-csrf")
+        request.state.rotate_session = True
+
+    monkeypatch.setattr(client.app.state.oidc, "callback", callback)
+    result = client.get("/auth/linkedin/callback", follow_redirects=False)
+    assert result.status_code == 303, result.text
+    auth = client.get("/api/auth/me").json()
+    assert auth["user"] == profile
+    return auth["csrf_token"]
 
 
 def submit(client, csrf, data, key="test-application-001", **fields):
@@ -117,6 +142,116 @@ def test_application_real_upload_idempotency_ownership_and_hr_download(client, p
     assert downloaded.status_code == 200 and downloaded.content == pdf_bytes
     assert downloaded.headers["content-type"] == "application/pdf"
     assert client.get(f"/api/hr/jobs/REQ-2026-002/candidates/{application_id}").status_code == 404
+
+
+def test_linkedin_without_optional_profile_can_apply_with_contact_and_keeps_identity(client, pdf_bytes, monkeypatch):
+    csrf = login_linkedin(client, monkeypatch)
+    adapter = client.app.state.adapter
+    submitted = AsyncMock(wraps=adapter.submit_application)
+    monkeypatch.setattr(adapter, "submit_application", submitted)
+    result = submit(
+        client,
+        csrf,
+        pdf_bytes,
+        candidate_name="  Sritharoon Kumar  ",
+        email="  sritharoon+jobs@example.test  ",
+        role="hr",
+        owner_sub="different-user",
+        owner_issuer="different-issuer",
+    )
+    assert result.status_code == 200, result.text
+    application_id = result.json()["application_id"]
+    submitted.assert_awaited_once()
+    payload = submitted.call_args.args[0]
+    assert payload["candidate_name"] == "Sritharoon Kumar"
+    assert payload["email"] == "sritharoon+jobs@example.test"
+    assert payload["owner_sub"] == "linkedin-user-001"
+    assert payload["owner_issuer"] == "https://www.linkedin.com/oauth"
+    own = client.get(f"/api/applications/{application_id}")
+    assert own.status_code == 200
+    assert own.json()["candidate_name"] == "Sritharoon Kumar"
+    assert own.json()["email"] == "sritharoon+jobs@example.test"
+    assert [record["application_id"] for record in client.get("/api/me/applications").json()] == [application_id]
+    session_user = client.get("/api/auth/me").json()["user"]
+    assert session_user["name"] == session_user["email"] == ""
+    assert session_user["role"] == "candidate"
+    assert client.get("/api/hr/jobs").status_code == 403
+    login_linkedin(
+        client,
+        monkeypatch,
+        sub="another-linkedin-user",
+        name="Sritharoon Kumar",
+        email="sritharoon+jobs@example.test",
+    )
+    assert client.get("/api/me/applications").json() == []
+    assert client.get(f"/api/applications/{application_id}").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "contact",
+    [
+        {},
+        {"candidate_name": "Applicant"},
+        {"email": "applicant@example.test"},
+        {"candidate_name": "", "email": "applicant@example.test"},
+        {"candidate_name": "  ", "email": "applicant@example.test"},
+        {"candidate_name": "12345", "email": "applicant@example.test"},
+        {"candidate_name": "Applicant\nInjected", "email": "applicant@example.test"},
+        {"candidate_name": "A" * 201, "email": "applicant@example.test"},
+        {"candidate_name": "Applicant", "email": ""},
+        {"candidate_name": "Applicant", "email": "  "},
+        {"candidate_name": "Applicant", "email": "not-an-email"},
+        {"candidate_name": "Applicant", "email": "applicant@example"},
+        {"candidate_name": "Applicant", "email": "applicant@example..test"},
+        {"candidate_name": "Applicant", "email": "applicant@-example.test"},
+        {"candidate_name": "Applicant", "email": "applicant..name@example.test"},
+        {"candidate_name": "Applicant", "email": "applicant@example.test\r\nInjected"},
+        {"candidate_name": "Applicant", "email": "a" * 310 + "@example.test"},
+    ],
+)
+def test_required_contact_rejected_before_resume_storage_or_application_submission(client, pdf_bytes, monkeypatch, contact):
+    csrf = login_linkedin(client, monkeypatch)
+    stored = AsyncMock(wraps=client.app.state.resumes.store)
+    submitted = AsyncMock(wraps=client.app.state.adapter.submit_application)
+    monkeypatch.setattr(client.app.state.resumes, "store", stored)
+    monkeypatch.setattr(client.app.state.adapter, "submit_application", submitted)
+    response = submit(client, csrf, pdf_bytes, **contact)
+    assert response.status_code == 422, response.text
+    stored.assert_not_awaited()
+    submitted.assert_not_awaited()
+    assert not list(client.app.state.settings.local_resume_dir.glob("*"))
+
+
+@pytest.mark.parametrize("field", ["candidate_name", "email"])
+def test_explicit_blank_contact_does_not_fall_back_to_authenticated_profile(client, pdf_bytes, field):
+    csrf = login(client)
+    assert submit(client, csrf, pdf_bytes, **{field: ""}).status_code == 422
+
+
+def test_effective_contact_is_trimmed_and_part_of_application_idempotency(client, pdf_bytes, monkeypatch):
+    csrf = login_linkedin(client, monkeypatch)
+    stored = AsyncMock(wraps=client.app.state.resumes.store)
+    submitted = AsyncMock(wraps=client.app.state.adapter.submit_application)
+    monkeypatch.setattr(client.app.state.resumes, "store", stored)
+    monkeypatch.setattr(client.app.state.adapter, "submit_application", submitted)
+    contact = {"candidate_name": "Applicant", "email": "applicant@example.test"}
+    first = submit(client, csrf, pdf_bytes, **contact)
+    assert first.status_code == 200, first.text
+    again = submit(client, csrf, pdf_bytes, candidate_name="  Applicant ", email=" applicant@example.test ")
+    assert again.status_code == 200 and again.json()["application_id"] == first.json()["application_id"]
+    assert submit(client, csrf, pdf_bytes, **{**contact, "candidate_name": "Changed Applicant"}).status_code == 409
+    assert submit(client, csrf, pdf_bytes, **{**contact, "email": "changed@example.test"}).status_code == 409
+    stored.assert_awaited_once()
+    submitted.assert_awaited_once()
+
+
+def test_omitted_contact_falls_back_to_existing_profile_with_same_effective_idempotency(client, pdf_bytes):
+    csrf = login(client)
+    first = submit(client, csrf, pdf_bytes)
+    assert first.status_code == 200, first.text
+    user = client.get("/api/auth/me").json()["user"]
+    again = submit(client, csrf, pdf_bytes, candidate_name=user["name"], email=user["email"])
+    assert again.status_code == 200 and again.json()["application_id"] == first.json()["application_id"]
 
 
 def test_upload_validation_consent_closed_job_and_body_cap(client, pdf_bytes):

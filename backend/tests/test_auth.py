@@ -126,19 +126,82 @@ async def test_linkedin_profile_cannot_overwrite_validated_identity_claims():
         {"sub": "different-user", "name": "Other Person", "email": "other@example.test", "email_verified": True},
         {"sub": "", "name": "Fictional Tester", "email": "test@example.test", "email_verified": True},
         {"name": "Fictional Tester", "email": "test@example.test", "email_verified": True},
-        {"sub": "user-1", "name": "Fictional Tester", "email": "test@example.test", "email_verified": False},
-        {"sub": "user-1", "name": "Fictional Tester", "email": "test@example.test"},
-        {"sub": "user-1", "email": "test@example.test", "email_verified": True},
-        {"sub": "user-1", "name": "Fictional Tester", "email_verified": True},
     ],
 )
-async def test_linkedin_rejects_missing_unverified_or_subject_mismatched_profile(profile):
+async def test_linkedin_rejects_missing_or_subject_mismatched_profile(profile):
     oidc, client, req = await configured_callback(omitted=("nonce",))
     client.userinfo.return_value = profile
     with pytest.raises(HTTPException) as error:
         await oidc.callback(req, "linkedin")
     assert error.value.status_code == 401
     assert "user" not in req.session
+
+
+@pytest.mark.parametrize(
+    "profile, expected_name, expected_email",
+    [
+        ({"sub": "user-1"}, "", ""),
+        ({"sub": "user-1", "name": "Fictional Tester"}, "Fictional Tester", ""),
+        ({"sub": "user-1", "email": "test@example.test"}, "", "test@example.test"),
+        (
+            {"sub": "user-1", "name": "Fictional Tester", "email": "test@example.test", "email_verified": False},
+            "Fictional Tester",
+            "test@example.test",
+        ),
+        (
+            {"sub": "user-1", "name": "Fictional Tester", "email": "test@example.test"},
+            "Fictional Tester",
+            "test@example.test",
+        ),
+        ({"sub": "user-1", "name": None, "email": None}, "", ""),
+        ({"sub": "user-1", "name": 123, "email": {"invalid": "email"}}, "", ""),
+        (
+            {"sub": "user-1", "given_name": " Fictional ", "family_name": " Tester "},
+            "Fictional Tester",
+            "",
+        ),
+        ({"sub": "user-1", "given_name": "Fictional", "family_name": ["Invalid"]}, "Fictional", ""),
+        (
+            {"sub": "user-1", "name": " Fictional Tester ", "email": " test@example.test "},
+            "Fictional Tester",
+            "test@example.test",
+        ),
+    ],
+)
+async def test_linkedin_profile_contact_fields_are_optional_and_do_not_define_identity(
+    profile, expected_name, expected_email
+):
+    oidc, client, req = await configured_callback(omitted=("nonce", "name", "email", "email_verified"))
+    client.userinfo.return_value = profile
+    user = await oidc.callback(req, "linkedin")
+    assert user.name == expected_name and user.email == expected_email
+    assert user.sub == "user-1" and user.issuer == oidc.settings.linkedin_issuer
+    assert user.role == "candidate" and req.session["user"]["role"] == "candidate"
+    assert req.state.rotate_session
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {"sub": "user-1"},
+        {"sub": "user-1", "name": None, "email": None, "email_verified": None},
+    ],
+)
+async def test_linkedin_omitted_profile_contacts_preserve_validated_token_contacts(profile):
+    oidc, client, req = await configured_callback(omitted=("nonce",))
+    client.userinfo.return_value = profile
+    user = await oidc.callback(req, "linkedin")
+    assert user.name == "Fictional Tester" and user.email == "test@example.test"
+    assert user.sub == "user-1" and user.issuer == oidc.settings.linkedin_issuer
+    assert user.role == "candidate"
+
+
+async def test_linkedin_supplied_malformed_profile_contacts_are_not_used_as_text():
+    oidc, client, req = await configured_callback(omitted=("nonce",))
+    client.userinfo.return_value = {"sub": "user-1", "name": ["Not a name"], "email": {"not": "an email"}}
+    user = await oidc.callback(req, "linkedin")
+    assert user.name == "" and user.email == ""
+    assert user.sub == "user-1" and user.role == "candidate"
 
 
 async def test_linkedin_profile_failure_has_no_identity_token_fallback():
@@ -271,6 +334,17 @@ async def test_entra_accepts_valid_signed_identity_and_nonce_without_profile_fet
     user = await oidc.callback(req, "hr")
     assert user.sub == "user-1" and user.role == "hr"
     assert req.state.rotate_session
+    client.userinfo.assert_not_awaited()
+
+
+@pytest.mark.parametrize("claim", ["name", "email"])
+async def test_entra_still_requires_profile_contact_fields(claim):
+    oidc, client, req = await configured_callback(provider="hr", omitted=(claim,))
+    with pytest.raises(HTTPException) as error:
+        await oidc.callback(req, "hr")
+    assert error.value.status_code == 401
+    assert error.value.detail == "Identity is missing required profile information"
+    assert "user" not in req.session
     client.userinfo.assert_not_awaited()
 
 

@@ -68,6 +68,32 @@ class DemoLogin(BaseModel):
     role: Literal["candidate", "hr"]
 
 
+def validate_application_contact(candidate_name: str, email: str) -> tuple[str, str]:
+    """Validate application contact without treating it as authenticated identity."""
+    candidate_name, email = candidate_name.strip(), email.strip()
+    if (
+        not candidate_name
+        or len(candidate_name) > 200
+        or not candidate_name.isprintable()
+        or not any(character.isalpha() for character in candidate_name)
+    ):
+        raise HTTPException(422, "Enter your full name using up to 200 characters")
+    local, separator, domain = email.partition("@")
+    atom = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+    labels = domain.split(".")
+    if (
+        not separator
+        or len(email) > 320
+        or len(local) > 64
+        or len(domain) > 253
+        or not re.fullmatch(atom + r"(?:\." + atom + r")*", local)
+        or len(labels) < 2
+        or any(not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) for label in labels)
+    ):
+        raise HTTPException(422, "Enter a valid contact email using up to 320 characters")
+    return candidate_name, email
+
+
 class RateLimiter:
     def __init__(self, settings, redis=None):
         self.settings, self.redis = settings, redis
@@ -258,6 +284,8 @@ def create_app(settings: Settings | None = None):
         user: Annotated[User, Depends(candidate_user)],
         requirement_id: Annotated[str, Form()],
         resume: Annotated[UploadFile, File()],
+        candidate_name: Annotated[str | None, Form()] = None,
+        email: Annotated[str | None, Form()] = None,
         phone: Annotated[str, Form()] = "",
         linkedin_url: Annotated[str, Form()] = "",
         consent_accepted: Annotated[bool, Form()] = False,
@@ -269,6 +297,12 @@ def create_app(settings: Settings | None = None):
             raise HTTPException(422, "A stable Idempotency-Key of 8 to 128 characters is required")
         if not consent_accepted or consent_version != settings.consent_version:
             raise HTTPException(422, "Accept the current consent notice before applying")
+        form = await request.form()
+        candidate_name, email = validate_application_contact(
+            (candidate_name or "") if "candidate_name" in form else user.name,
+            (email or "") if "email" in form else user.email,
+        )
+        application_user = user.model_copy(update={"name": candidate_name, "email": email})
         if len(phone) > 30 or not re.fullmatch(r"[0-9+() .-]*", phone):
             raise HTTPException(422, "Enter a valid phone number")
         if linkedin_url:
@@ -301,9 +335,11 @@ def create_app(settings: Settings | None = None):
             app.state.resumes.validate_upload(data, filename, resume.content_type or "")
         except ResumeValidationError as exc:
             raise HTTPException(422, str(exc)) from None
-        fingerprint = submission_fingerprint(requirement_id, data, phone, linkedin_url, consent_version)
+        fingerprint = submission_fingerprint(
+            requirement_id, data, phone, linkedin_url, consent_version, candidate_name=candidate_name, email=email
+        )
         return await app.state.coordinator.submit(
-            user, idempotency_key, fingerprint, job, data, filename, phone, linkedin_url, consent_version
+            application_user, idempotency_key, fingerprint, job, data, filename, phone, linkedin_url, consent_version
         )
 
     async def processing_status(record):

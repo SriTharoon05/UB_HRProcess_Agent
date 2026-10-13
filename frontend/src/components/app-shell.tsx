@@ -33,6 +33,8 @@ export function AppShell() {
   const hr =
     location.pathname.startsWith("/hr") && location.pathname !== "/hr/login";
   const user = session?.user;
+  const displayName =
+    user?.name.trim() || (user?.role === "hr" ? "HR team" : "Candidate");
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
@@ -224,9 +226,9 @@ export function AppShell() {
             <span className="topbar-divider" />
             {user ? (
               <div className="user-chip">
-                <Avatar name={user.name} size="sm" />
+                <Avatar name={displayName} size="sm" />
                 <div>
-                  <strong>{user.name}</strong>
+                  <strong>{displayName}</strong>
                   <span>
                     {user.role === "hr" ? "HR workspace" : "Candidate"}
                   </span>

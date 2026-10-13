@@ -67,7 +67,7 @@ Return open, currently eligible requirements. Recheck eligibility at application
 | ModifiedDateTime | UtcDateTime | Latest modification time |
 | DataAreaId | String | Legal entity/company |
 
-Identity is `(LinkedInIssuer, LinkedInSub)` within the chosen company policy, never name alone. LinkedIn's `openid profile email` scopes do not promise a phone number, profile URL, employment history, or skills. The application form collects optional contact fields. Upsert an existing identity before creating a new candidate.
+Identity is `(LinkedInIssuer, LinkedInSub)` within the chosen company policy, never name or email. LinkedIn's `openid profile email` scopes do not guarantee complete contact information, a profile URL, employment history, or skills. The application form prefills available profile data and collects the required full name and contact email plus optional contact fields. These editable fields do not replace the authenticated identity. Upsert an existing identity before creating a new candidate.
 
 ## Job application: `UBHRJobApplication`
 
