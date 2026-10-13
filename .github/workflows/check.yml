@@ -1,0 +1,50 @@
+name: Verify application
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      REDIS_TEST_URL: redis://127.0.0.1:6380/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.23'
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev --extra e2e
+        working-directory: backend
+      - run: npm ci
+        working-directory: frontend
+      - run: bash scripts/check.sh
+      - run: uv run --frozen --extra e2e playwright install --with-deps chromium
+        working-directory: backend
+      - name: Exercise the demo browser workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/dev.sh >"$RUNNER_TEMP/talentmatch-dev.log" 2>&1 &
+          RECRUITMENT_DEV_PID=$!
+          trap 'kill "$RECRUITMENT_DEV_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/api/health >/dev/null; then break; fi
+            sleep 1
+          done
+          cd backend
+          uv run --frozen --extra e2e python ../scripts/smoke.py

@@ -1,0 +1,96 @@
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from pydantic import AliasChoices, Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False, populate_by_name=True)
+    app_name: str = "TalentMatch AI"
+    app_env: Literal["development", "test", "production"] = "development"
+    demo_mode: bool = True
+    frontend_url: str = Field(
+        default="http://localhost:5173", validation_alias=AliasChoices("FRONTEND_BASE_URL", "FRONTEND_URL")
+    )
+    backend_url: str = Field(
+        default="http://localhost:8000", validation_alias=AliasChoices("BACKEND_BASE_URL", "BACKEND_URL")
+    )
+    cors_origins: list[str] = Field(
+        default=["http://localhost:5173", "http://127.0.0.1:5173"],
+        validation_alias=AliasChoices("CORS_ALLOWED_ORIGINS", "CORS_ORIGINS"),
+    )
+    session_cookie_name: str = "talentmatch_session"
+    session_ttl_seconds: int = Field(default=28800, ge=300, le=86400)
+    redis_url: str = Field(default="redis://localhost:6379/0", repr=False)
+    redis_prefix: str = "talentmatch"
+    max_resume_size_mb: int = Field(default=10, ge=1, le=25)
+    max_resume_uncompressed_mb: int = 40
+    local_resume_dir: Path = Path(".local/resumes")
+    retention_days: int = Field(default=90, ge=1)
+    consent_version: str = "v1"
+    public_rate_limit: int = 120
+    upload_rate_limit: int = 10
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = Field(default="", repr=False)
+    linkedin_redirect_uri: str = "http://localhost:8000/auth/linkedin/callback"
+    linkedin_issuer: str = "https://www.linkedin.com/oauth"
+    linkedin_discovery_url: str = "https://www.linkedin.com/oauth/.well-known/openid-configuration"
+    entra_tenant_id: str = Field(default="", validation_alias=AliasChoices("HR_ENTRA_TENANT_ID", "ENTRA_TENANT_ID"))
+    entra_client_id: str = Field(default="", validation_alias=AliasChoices("HR_ENTRA_CLIENT_ID", "ENTRA_CLIENT_ID"))
+    entra_client_secret: str = Field(
+        default="", repr=False, validation_alias=AliasChoices("HR_ENTRA_CLIENT_SECRET", "ENTRA_CLIENT_SECRET")
+    )
+    entra_redirect_uri: str = Field(
+        default="http://localhost:8000/auth/hr/callback",
+        validation_alias=AliasChoices("HR_ENTRA_REDIRECT_URI", "ENTRA_REDIRECT_URI"),
+    )
+    entra_hr_role: str = "TalentMatch.HR"
+    hr_allowed_roles: list[str] = ["HRRecruiter", "HRAdministrator", "TalentMatch.HR"]
+    d365_enabled: bool = False
+    d365_base_url: str = "https://org1a43c536.operations.dynamics.com"
+    d365_tenant_id: str = ""
+    d365_client_id: str = ""
+    d365_client_secret: str = Field(default="", repr=False)
+    d365_company: str = "DAT"
+    d365_parameter_name: str = "_request"
+    d365_requirement_path: str = "/api/services/UBHRApplicationServiceGroup/UBHRApplicationService/getOpenRequirements"
+    d365_submit_application_path: str = (
+        "/api/services/UBHRApplicationServiceGroup/UBHRApplicationService/submitApplication"
+    )
+    d365_save_evaluation_path: str = ""
+    d365_top_candidates_path: str = ""
+    d365_my_applications_path: str = ""
+    d365_application_path: str = ""
+    d365_http_timeout: float = 30
+    d365_request_wrappers: dict[str, str] = {"get_open_requirements": ""}
+    d365_request_field_maps: dict[str, dict[str, str]] = {}
+    d365_response_field_maps: dict[str, dict[str, str]] = {}
+    azure_openai_endpoint: str = "https://voiceagentdemo-resource.cognitiveservices.azure.com/"
+    azure_openai_api_key: str = Field(default="", repr=False)
+    azure_openai_deployment: str = "gpt-4.1-mini"
+    azure_openai_api_version: str = "2025-03-01-preview"
+    azure_openai_prompt_version: str = "v1"
+    azure_openai_max_resume_chars: int = 100000
+    azure_storage_connection_string: str = Field(default="", repr=False)
+    azure_storage_container: str = "resumes"
+    evaluation_max_attempts: int = Field(default=5, ge=1, le=10)
+
+    @model_validator(mode="after")
+    def secure_production(self):
+        if "*" in self.cors_origins:
+            raise ValueError("CORS must use explicit allowed origins")
+        if self.app_env == "production":
+            if self.demo_mode:
+                raise ValueError("DEMO_MODE must be false in production")
+            if not self.frontend_url.startswith("https://") or not self.backend_url.startswith("https://"):
+                raise ValueError("Production frontend and backend URLs must use HTTPS")
+            if any(not origin.startswith("https://") for origin in self.cors_origins):
+                raise ValueError("Production CORS origins must use HTTPS")
+        return self
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

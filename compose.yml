@@ -1,0 +1,50 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: [redis-server, --appendonly, 'yes', --appendfsync, everysec]
+    volumes:
+      - queue:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  api:
+    build: ./backend
+    environment:
+      APP_ENV: development
+      DEMO_MODE: 'true'
+      REDIS_URL: redis://redis:6379/0
+      FRONTEND_BASE_URL: http://localhost:5173
+      BACKEND_BASE_URL: http://localhost:5173
+      CORS_ALLOWED_ORIGINS: '["http://localhost:5173"]'
+      LOCAL_RESUME_DIR: /app/data/resumes
+    volumes:
+      - private-resumes:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  web:
+    build: ./frontend
+    ports:
+      - 127.0.0.1:5173:8080
+    depends_on:
+      - api
+    restart: unless-stopped
+  worker:
+    build: ./backend
+    profiles: [connected]
+    command: [python, -m, app.worker]
+    env_file: ./backend/.env
+    environment:
+      DEMO_MODE: 'false'
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  queue:
+  private-resumes:

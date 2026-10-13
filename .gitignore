@@ -1,0 +1,33 @@
+# Local credentials and private documents
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+backend/data/
+backend/.data/
+backend/.local/
+data/
+*.rdb
+
+# Dependencies, build and test outputs
+node_modules/
+dist/
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+coverage/
+.coverage
+htmlcov/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+.idea/
+.vscode/

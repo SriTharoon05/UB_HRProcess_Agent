@@ -1,0 +1,28 @@
+# TalentMatch API contract
+
+All frontend requests use same-origin `/api` and `/auth` (Vite proxies to port 8000), credentials included. JSON uses snake_case. API errors use `{detail: string}`. No secrets in frontend.
+
+- `GET /api/health` -> `{status: "ok", demo_mode: boolean, app_name: string}`
+- `GET /api/auth/me` -> `{user: User|null, csrf_token: string, demo_mode: boolean, consent_version: string}`. Mutations send `X-CSRF-Token`.
+- `POST /api/auth/demo` JSON `{role: "candidate"|"hr"}` -> auth response; requires CSRF, development demo only.
+- `POST /api/auth/logout` -> `{success:true}`.
+- `/auth/linkedin/login`, `/auth/hr/login` -> OIDC redirect. Callback redirects to frontend candidate applications or /hr.
+- `GET /api/jobs` and HR `/api/hr/jobs` -> `Job[]`; query `search`, `department`, `location`, `work_mode`, `employment_type` supported.
+- `GET /api/jobs/{requirement_id}` -> `Job`.
+- `POST /api/applications`: multipart `requirement_id`, `resume` PDF/DOCX, `phone`, `linkedin_url`, `consent_accepted=true`, `consent_version` from the current auth response (default `v1`). `Idempotency-Key` stable per form submission. -> `{success:true, application_id:string, ai_status:string, message:string}`.
+- `GET /api/me/applications` -> `Application[]`; `GET /api/applications/{id}` -> own Application. Never include internal evaluation in candidate responses.
+- `GET /api/hr/jobs/{requirement_id}/candidates` -> `{candidates:Candidate[], limit:number, returned_count:number}` (default limit 25, not total population).
+- `GET /api/hr/jobs/{requirement_id}/candidates/{application_id}` -> `Candidate`.
+- `GET /api/hr/applications/{id}/resume` -> authorized PDF/DOCX stream; reference must come from D365 or demo adapter.
+
+```ts
+interface User {sub:string; name:string; email:string; role:'candidate'|'hr'; issuer:string}
+interface Job {requirement_id:string; title:string; description:string; responsibilities:string; required_skills:string[]; preferred_skills:string[]; qualifications:string; department:string; location:string; work_mode:string; employment_type:string; min_experience:number|null; max_experience:number|null; openings:number|null; status:string; published_date:string|null; deadline:string|null}
+interface Application {application_id:string; requirement_id:string; job_title:string; candidate_name:string; email:string; applied_date:string|null; hr_status:string; ai_status:string; resume_file_name:string; demo_fixture?:boolean}
+interface Evidence {requirement:string; resume_section:string; project_name:string; evidence:string; reason:string; evidence_strength:string}
+interface Gap {requirement:string; reason:string}
+interface Evaluation {score:number; meets_minimum_criteria:boolean; match_label:string; score_justification:string; summary:string; matched_requirements:Evidence[]; partially_matched_requirements:Evidence[]; not_evidenced_requirements:Gap[]; evaluation_confidence:string; relevant_evidence:Evidence[]; model_deployment:string; prompt_version:string; rubric_version:string}
+interface Candidate extends Application {candidate_id:string; linkedin_url:string; evaluation:Evaluation|null; evaluation_date:string|null; demo_fixture:boolean}
+```
+
+Production integrations never fall back to fixtures. Demo jobs/candidates/AI results are explicitly fictional fixtures. Demo submission stores a real uploaded document and uses only a labeled sample evaluation, not an actual AI score.
