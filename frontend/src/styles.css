@@ -5587,6 +5587,13 @@ select {
 .job-description h3,
 .role-summary h3,
 .login-art h1,
+.hr-login-form {
+  display: grid;
+  gap: 18px;
+  width: 100%;
+  text-align: left;
+}
+
 .login-card h2,
 .form-section-title h2,
 .application-job-card h3,

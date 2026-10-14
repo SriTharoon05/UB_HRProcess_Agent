@@ -62,6 +62,14 @@ export const api = {
     setCsrfToken(value.csrf_token);
     return value;
   },
+  hrLogin: async (username: string, password: string) => {
+    const value = await request<AuthSession>("/api/auth/hr", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    setCsrfToken(value.csrf_token);
+    return value;
+  },
   logout: () =>
     request<{ success: boolean }>("/api/auth/logout", { method: "POST" }),
   jobs: (hr = false) => request<Job[]>(hr ? "/api/hr/jobs" : "/api/jobs"),

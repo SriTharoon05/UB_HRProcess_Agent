@@ -39,6 +39,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export HR_USERNAME=browser-test-hr
+          export HR_PASSWORD="$(cd backend && uv run --frozen python -c 'import secrets; print(secrets.token_urlsafe(24))')"
           bash scripts/dev.sh >"$RUNNER_TEMP/talentmatch-dev.log" 2>&1 &
           RECRUITMENT_DEV_PID=$!
           trap 'kill "$RECRUITMENT_DEV_PID" 2>/dev/null || true' EXIT

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import {
   Link,
   useLocation,
@@ -638,12 +638,30 @@ export function JobDetailsPage() {
 }
 
 export function LoginPage({ hr = false }: { hr?: boolean }) {
-  const { session, loginDemo, loading, error, refresh } = useAuth();
+  const { session, loginDemo, loginHR, loading, error, refresh } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [busy, setBusy] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
   const requestedReturn = returnPath(location.state?.from, hr);
   const from = requestedReturn || (hr ? "/hr" : "/candidate/applications");
+  async function signInHR(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || loading || error) return;
+    setBusy(true);
+    setLoginError("");
+    try {
+      await loginHR(username, password);
+      setPassword("");
+      navigate(from, { replace: true });
+    } catch (value) {
+      setLoginError(value instanceof Error ? value.message : "Unable to sign in.");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function demo() {
     setBusy(true);
     try {
@@ -713,7 +731,7 @@ export function LoginPage({ hr = false }: { hr?: boolean }) {
         <h2>{hr ? "Hello, team." : "Hello, possibility."}</h2>
         <p>
           {hr
-            ? "Sign in securely with your organization’s HR identity."
+            ? "Enter your HR username and password to open your recruitment workspace."
             : "Sign in with LinkedIn to apply for roles and follow your applications."}
         </p>
         {session?.user?.role === (hr ? "hr" : "candidate") && (
@@ -724,23 +742,40 @@ export function LoginPage({ hr = false }: { hr?: boolean }) {
             </Link>
           </Button>
         )}
-        <Button asChild variant="dark" className="full-width">
-          <a href={signInHref(hr, requestedReturn)}>
-            {hr ? <ShieldCheck size={17} /> : <Linkedin size={17} />}
-            {hr ? "Sign in with Microsoft" : "Continue with LinkedIn"}
-            <ArrowRight size={15} />
-          </a>
-        </Button>
+        {hr ? (
+          <form className="hr-login-form" onSubmit={(event) => { void signInHR(event); }}>
+            <label className="form-field">
+              <span>Username</span>
+              <input name="username" type="text" autoComplete="username" maxLength={320} required
+                value={username} onChange={(event) => setUsername(event.target.value)} disabled={busy} />
+            </label>
+            <label className="form-field">
+              <span>Password</span>
+              <input name="password" type="password" autoComplete="current-password" maxLength={1024} required
+                value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />
+            </label>
+            {loginError && <p role="alert" className="field-error">{loginError}</p>}
+            <Button type="submit" variant="dark" className="full-width" disabled={busy || loading || !!error}>
+              {busy ? <Spinner label="Signing in…" /> : <>Sign in to HR <ArrowRight size={15} /></>}
+            </Button>
+          </form>
+        ) : (
+          <Button asChild variant="dark" className="full-width">
+            <a href={signInHref(false, requestedReturn)}>
+              <Linkedin size={17} />Continue with LinkedIn<ArrowRight size={15} />
+            </a>
+          </Button>
+        )}
         <div className="login-security">
           <ShieldCheck size={13} />
-          Secure sign-in. No passwords to remember.
+          {hr ? "Your credentials are checked securely by the server." : "Secure sign-in. No passwords to remember."}
         </div>
         {loading ? (
           <Spinner label="Checking workspace…" />
         ) : error ? (
           <ErrorState error={error} retry={refresh} />
         ) : (
-          session?.demo_mode && (
+          !hr && session?.demo_mode && (
             <div className="login-demo">
               <div className="divider-label">
                 <span />

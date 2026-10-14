@@ -24,7 +24,7 @@ When a managed network uses its own trusted certificate authority, both Dockerfi
 
 ## Minimum connected configuration
 
-Set `APP_ENV=production`, `DEMO_MODE=false`, `D365_ENABLED=true`, `D365_CONTRACT_MODE=sqlite`, a shared absolute `SQLITE_DATABASE_PATH`, HTTPS `FRONTEND_BASE_URL`/`BACKEND_BASE_URL`, and an explicit JSON `CORS_ALLOWED_ORIGINS` allowlist. Configure exact HTTPS OAuth callbacks, LinkedIn credentials, tenant-specific HR credentials/roles, D365 service credentials, private Blob settings, Azure OpenAI deployment settings, and private Redis.
+Set `APP_ENV=production`, `DEMO_MODE=false`, `D365_ENABLED=true`, `D365_CONTRACT_MODE=sqlite`, a shared absolute `SQLITE_DATABASE_PATH`, HTTPS `FRONTEND_BASE_URL`/`BACKEND_BASE_URL`, and an explicit JSON `CORS_ALLOWED_ORIGINS` allowlist. Configure the exact HTTPS LinkedIn OAuth callback and credentials, backend-only `HR_USERNAME`/`HR_PASSWORD`, D365 service credentials, private Blob settings, Azure OpenAI deployment settings, and private Redis. HR password login does not require an Entra web-app registration or HR callback; D365's separate service-app credentials remain required.
 
 Production configuration rejects demo mode, non-HTTPS portal/backend URLs, wildcard CORS, and non-HTTPS allowed origins. Cookies are Secure/HttpOnly/SameSite=Lax in production. Prefer same-origin hosting so cookies, callback state, and CSRF checks have one clear trust boundary.
 

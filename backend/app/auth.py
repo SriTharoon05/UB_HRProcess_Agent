@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import re
@@ -18,6 +19,24 @@ from app.errors import ConfigurationError
 from app.models import User
 from app.observability import log_event, traced
 from app.profile import linkedin_profile
+
+
+@traced("auth.hr.password")
+def password_hr_user(settings: Settings, username: str, password: str) -> User:
+    if not settings.hr_username or not settings.hr_password:
+        log_event("auth.hr.password", "rejected", reason="credentials_not_configured")
+        raise ConfigurationError("HR login is not configured. Set HR_USERNAME and HR_PASSWORD in backend/.env.")
+    # Fixed-size comparisons support Unicode and avoid credential-length timing.
+    username_matches = secrets.compare_digest(hashlib.sha256(username.encode("utf-8", errors="surrogatepass")).digest(),
+                                              hashlib.sha256(settings.hr_username.encode("utf-8", errors="surrogatepass")).digest())
+    password_matches = secrets.compare_digest(hashlib.sha256(password.encode("utf-8", errors="surrogatepass")).digest(),
+                                              hashlib.sha256(settings.hr_password.encode("utf-8", errors="surrogatepass")).digest())
+    if not (username_matches & password_matches):
+        log_event("auth.hr.password", "rejected", reason="invalid_credentials", status_code=401)
+        raise HTTPException(401, "Invalid username or password")
+    log_event("auth.hr.password", "validated", authenticated=True, role="hr")
+    return User(sub="environment-hr-admin", issuer="urn:talentmatch:hr:environment", role="hr",
+                name="HR Administrator", email=settings.hr_username)
 
 
 @traced("auth.oidc.return_validation")

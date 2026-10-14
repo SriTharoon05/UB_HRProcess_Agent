@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     consent_version: str = "v1"
     public_rate_limit: int = 120
     upload_rate_limit: int = 10
+    hr_login_rate_limit: int = Field(default=5, ge=1, le=120)
+    hr_username: str = Field(default="", max_length=320, repr=False)
+    hr_password: str = Field(default="", max_length=1024, repr=False)
     linkedin_client_id: str = ""
     linkedin_client_secret: str = Field(default="", repr=False)
     linkedin_redirect_uri: str = "http://localhost:8000/auth/linkedin/callback"

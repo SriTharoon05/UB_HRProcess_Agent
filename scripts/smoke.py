@@ -10,14 +10,20 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
 import pymupdf as fitz
 from playwright.sync_api import expect, sync_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from app.config import get_settings  # noqa: E402
+
 
 def main():
+    settings = get_settings()
+    assert settings.hr_username and settings.hr_password, "Set HR_USERNAME and HR_PASSWORD for the running demo API and smoke process"
     base = os.environ.get("SMOKE_BASE_URL", "http://127.0.0.1:5173")
     browser_path = os.environ.get("CHROMIUM_PATH") or shutil.which("chromium")
     with tempfile.TemporaryDirectory(prefix="talentmatch-smoke-") as temp, sync_playwright() as playwright:
@@ -86,7 +92,9 @@ def main():
         assert context.request.get(f"{base}/api/hr/jobs").status == 403
 
         page.goto(f"{base}/hr/login")
-        page.get_by_test_id("demo-hr-login").click()
+        page.get_by_role("textbox", name="Username", exact=True).fill(settings.hr_username)
+        page.get_by_label("Password", exact=True).fill(settings.hr_password)
+        page.get_by_role("button", name="Sign in to HR", exact=True).click()
         page.wait_for_url(re.compile(r"/hr/?$"))
         page.goto(f"{base}/hr/jobs/{requirement_id}/candidates")
         expect(page.get_by_text(application["candidate_name"], exact=True).first).to_be_visible()

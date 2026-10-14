@@ -7,6 +7,7 @@ For a LinkedIn user, `User.name` and `User.email` can be empty strings when the 
 - `GET /api/health` -> `{status: "ok", demo_mode: boolean, app_name: string}`
 - `GET /api/auth/me` -> `{user: User|null, csrf_token: string, demo_mode: boolean, consent_version: string}`. Mutations send `X-CSRF-Token`.
 - `POST /api/auth/demo` JSON `{role: "candidate"|"hr"}` -> auth response; requires CSRF, development demo only.
+- `POST /api/auth/hr` JSON `{username: string, password: string}` -> auth response. Requires CSRF, exact backend `HR_USERNAME`/`HR_PASSWORD` matching, and HR login rate limiting. Success rotates the session/CSRF token and assigns the server-controlled HR role.
 - `POST /api/auth/logout` -> `{success:true}`.
 - `/auth/linkedin/login`, `/auth/hr/login` -> OIDC redirect. Optional `return_to` is a validated relative route bound to server-side OAuth state. Callback returns to that saved route on the configured frontend origin, defaulting to candidate applications or /hr. Callback query parameters cannot override it.
 - `GET /api/jobs` and HR `/api/hr/jobs` -> `Job[]`; query `search`, `department`, `location`, `work_mode`, `employment_type` supported.

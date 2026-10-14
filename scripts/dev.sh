@@ -13,6 +13,6 @@ cleanup() {
 trap cleanup EXIT INT TERM
 (cd backend && exec .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000) &
 RECRUITMENT_API_PID=$!
-(cd frontend && exec node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort) &
+(cd frontend && export DEV_API_PROXY_TARGET=http://127.0.0.1:8000 && exec node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort) &
 RECRUITMENT_WEB_PID=$!
 wait -n "$RECRUITMENT_API_PID" "$RECRUITMENT_WEB_PID"

@@ -8,7 +8,7 @@ flowchart LR
     HR[HR browser] --> UI
     UI --> API[FastAPI API]
     API --> LI[LinkedIn OIDC]
-    API --> Entra[Microsoft Entra ID]
+    API --> HRAuth[Environment HR credentials\nServer-side verification]
     API --> D365[D365 custom services\nCore recruitment records]
     API --> SQLite[SQLite\nDurable portal metadata and snapshots]
     API --> Storage[Private resume storage\nAzure Blob / local development]

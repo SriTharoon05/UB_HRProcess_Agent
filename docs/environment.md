@@ -2,7 +2,7 @@
 
 FastAPI loads `backend/.env` when started from `backend/`, then applies process environment overrides through Pydantic Settings. The worker uses the same settings. Copy `.env.example` only if a local file does not already exist; keep real `.env` files and secrets out of Git. Restart affected API/worker processes after changing settings.
 
-The default is `APP_ENV=development`, `DEMO_MODE=true`, and D365 disabled. This is the credential-free demo workflow. Connected mode selects only real integration adapters; missing configuration produces an explicit error. Production requires `APP_ENV=production`, `DEMO_MODE=false`, and HTTPS URLs/origins.
+The default is `APP_ENV=development`, `DEMO_MODE=true`, and D365 disabled. Candidate demo access requires no external credentials. HR sign-in uses the configured `HR_USERNAME`/`HR_PASSWORD` in both demo and connected mode. Connected mode selects only real integration adapters; missing configuration produces an explicit error. Production requires `APP_ENV=production`, `DEMO_MODE=false`, and HTTPS URLs/origins.
 
 For list/dictionary values, use **JSON**, not comma-separated strings:
 
@@ -32,9 +32,15 @@ D365_REQUEST_FIELD_MAPS={}
 | `UPLOAD_RATE_LIMIT` | `10` | Resume-submission requests per client IP per 60-second bucket |
 | `EVALUATION_MAX_ATTEMPTS` | `5` | Bound for transient evaluation retry attempts |
 
-Sessions store only a random reference in the browser and keep their data server-side. A `SESSION_SECRET` is not needed for this session design. Demo state is process-local; connected mode requires Redis. The supplied `APP_DEBUG` and `LOG_LEVEL` examples are not used as application configuration toggles unless explicitly implemented; they are omitted from the example instead of suggesting unsupported controls.
+Sessions store only a random reference in the browser and keep their data server-side. A `SESSION_SECRET` is not needed for this session design. Demo state is process-local; connected mode requires Redis. `LOG_LEVEL=INFO` enables stage progress; `DEBUG` adds safe D365 contract-shape details. See [terminal debugging](debugging.md).
 
-## LinkedIn and HR OIDC
+## HR username/password
+
+Set `HR_USERNAME` and `HR_PASSWORD` only in `backend/.env` or backend runtime secrets. Both default to empty; there is no built-in account or password. Matching is exact and case-sensitive. Usernames are plain text, so an address without a public email domain is accepted. `HR_LOGIN_RATE_LIMIT` defaults to five attempts per client per minute. Restart the backend after changing credentials.
+
+The `/hr/login` form sends a CSRF-protected request to `/api/auth/hr`. Successful authentication creates an HR session and returns to the requested HR page. Credentials are not stored in browser storage or included in stage logs. The frontend needs no credential environment variables.
+
+## LinkedIn and optional legacy HR OIDC
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

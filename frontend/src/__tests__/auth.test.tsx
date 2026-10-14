@@ -81,16 +81,31 @@ describe('authentication and role boundaries', () => {
     expect(await screen.findByRole('heading', {name: 'Verified HR workspace'})).toBeVisible();
   });
 
-  it('labels demo access separately from external authentication and sends the selected HR role', async () => {
+  it('signs in with HR credentials and returns to the requested protected page', async () => {
     vi.mocked(api.session).mockResolvedValue(session(null));
-    const demo = vi.spyOn(api, 'demoLogin').mockResolvedValue(session(hrUser));
-    renderRoutes(<><Route path="/hr/login" element={<LoginPage hr />} /><Route path="/hr" element={<Protected role="hr"><p>Signed in to HR demo</p></Protected>} /></>, '/hr/login');
-    expect(await screen.findByRole('button', {name: 'Explore HR demo'})).toBeVisible();
-    expect(screen.getByRole('link', {name: 'Sign in with Microsoft'})).toHaveAttribute('href', '/auth/hr/login');
-    expect(screen.getByText(/fictional jobs and candidate evidence/)).toBeVisible();
-    await userEvent.click(screen.getByRole('button', {name: 'Explore HR demo'}));
-    expect(demo).toHaveBeenCalledWith('hr');
-    expect(await screen.findByText('Signed in to HR demo')).toBeVisible();
+    const login = vi.spyOn(api, 'hrLogin').mockResolvedValue(session(hrUser));
+    renderRoutes(<><Route path="/hr/login" element={<LoginPage hr />} /><Route path="/hr/jobs/TEST/candidates" element={<Protected role="hr"><p>Requested HR candidates</p></Protected>} /></>, '/hr/jobs/TEST/candidates');
+    const username = await screen.findByRole('textbox', {name: 'Username'});
+    await userEvent.type(username, 'fixture@staff');
+    await userEvent.type(screen.getByLabelText('Password'), 'test-only-password');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password');
+    expect(screen.queryByRole('link', {name: 'Sign in with Microsoft'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: 'Explore HR demo'})).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', {name: 'Sign in to HR'}));
+    expect(login).toHaveBeenCalledWith('fixture@staff', 'test-only-password');
+    expect(await screen.findByText('Requested HR candidates')).toBeVisible();
+  });
+
+  it('shows rejected HR credentials without rendering protected data', async () => {
+    vi.mocked(api.session).mockResolvedValue({...session(null), demo_mode: false});
+    vi.spyOn(api, 'hrLogin').mockRejectedValue(new Error('Invalid username or password'));
+    renderRoutes(<><Route path="/hr/login" element={<LoginPage hr />} /><Route path="/hr" element={<Protected role="hr"><p>Confidential HR data</p></Protected>} /></>, '/hr/login');
+    await userEvent.type(await screen.findByRole('textbox', {name: 'Username'}), 'wrong@staff');
+    await userEvent.type(screen.getByLabelText('Password'), 'wrong-test-password');
+    await userEvent.click(screen.getByRole('button', {name: 'Sign in to HR'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid username or password');
+    expect(screen.queryByText('Confidential HR data')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Sign in to HR'})).toBeEnabled();
   });
 
   it('hides demo authentication in production mode', async () => {

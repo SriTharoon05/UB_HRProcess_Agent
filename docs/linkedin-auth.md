@@ -1,6 +1,6 @@
 # Candidate and HR authentication
 
-Authentication is handled by FastAPI. The frontend redirects the browser to `/auth/linkedin/login` or `/auth/hr/login`; it does not exchange authorization codes, store provider credentials, or receive D365 tokens.
+Authentication is handled by FastAPI. Candidates use `/auth/linkedin/login`. The HR form posts username/password to `/api/auth/hr`, where they are compared with backend environment credentials. The frontend does not exchange authorization codes, persist credentials, or receive D365 tokens.
 
 ## LinkedIn candidates
 
@@ -54,9 +54,15 @@ This is an illustrative public-profile object, not a guaranteed LinkedIn respons
 
 Before submission, the candidate confirms the editable full name and contact email, fills optional phone/profile URL, uploads a resume, and accepts consent. The authenticated issuer/subject remain fixed. The D365 submission includes the confirmed contact details and a separate optional provider-profile snapshot. Candidate/application persistence must complete before an `ApplicationId` is acknowledged and evaluation is queued. The worker saves resume/JD matching results through the separate evaluation service, linked by that identifier. See [D365 contracts](d365-endpoints.md).
 
-## Microsoft Entra HR users
+## HR username/password
 
-Create a tenant-specific web application registration with an authorization-code callback. Configure:
+Configure `HR_USERNAME` and `HR_PASSWORD` in `backend/.env` or backend runtime secrets, then restart the API. Both must be set; there is no default account. Enter them on `/hr/login`. Matching is exact and case-sensitive; the username is not required to be a public email address.
+
+The backend checks both credentials, assigns the HR role, and rotates the opaque session and CSRF token. Existing HR API and private resume authorization checks apply. `HR_LOGIN_RATE_LIMIT` defaults to five attempts per client per minute. Missing configuration returns 503; incorrect credentials return a generic 401. Credentials are excluded from terminal logs and browser storage. D365's service-app credentials are separate and remain required.
+
+## Optional legacy Microsoft Entra HR users
+
+The older HR OIDC endpoints remain available for deployments that explicitly configure them; the current HR sign-in page uses username/password and does not link to Microsoft. To use the legacy endpoints, create a tenant-specific web application registration with an authorization-code callback. Configure:
 
 ```dotenv
 HR_ENTRA_TENANT_ID=

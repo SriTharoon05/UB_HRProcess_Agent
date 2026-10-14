@@ -15,9 +15,9 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth import OIDC, OpaqueSessionMiddleware, SessionStore, candidate_user, hr_user, oauth_return_path, require_csrf
+from app.auth import OIDC, OpaqueSessionMiddleware, SessionStore, candidate_user, hr_user, oauth_return_path, password_hr_user, require_csrf
 from app.config import Settings, get_settings
 from app.demo import DemoAdapter
 from app.errors import IntegrationError, ResumeValidationError
@@ -76,6 +76,12 @@ class DemoLogin(BaseModel):
     role: Literal["candidate", "hr"]
 
 
+class HRLogin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=320)
+    password: str = Field(min_length=1, max_length=1024, repr=False)
+
+
 @traced("application.contact.validate")
 def validate_application_contact(candidate_name: str, email: str) -> tuple[str, str]:
     """Validate application contact without treating it as authenticated identity."""
@@ -100,11 +106,12 @@ class RateLimiter:
         self.memory = {}
 
     @traced("http.rate_limit")
-    async def check(self, request, upload=False):
+    async def check(self, request, upload=False, hr_login=False):
         address = request.client.host if request.client else "unknown"
         # Do not trust forwarded headers supplied by public clients.
         bucket = int(time.time() // 60)
-        key = f"{self.settings.redis_prefix}:rate:{hashlib.sha256(address.encode()).hexdigest()}:{'upload' if upload else 'public'}:{bucket}"
+        category = "hr-login" if hr_login else ("upload" if upload else "public")
+        key = f"{self.settings.redis_prefix}:rate:{hashlib.sha256(address.encode()).hexdigest()}:{category}:{bucket}"
         if self.redis:
             count = await self.redis.incr(key)
             if count == 1:
@@ -113,7 +120,9 @@ class RateLimiter:
             self.memory = {k: v for k, v in self.memory.items() if k.endswith(f":{bucket}")}
             count = self.memory.get(key, 0) + 1
             self.memory[key] = count
-        limit = self.settings.upload_rate_limit if upload else self.settings.public_rate_limit
+        limit = self.settings.hr_login_rate_limit if hr_login else (
+            self.settings.upload_rate_limit if upload else self.settings.public_rate_limit
+        )
         if count > limit:
             log_event("http.rate_limit", "rejected", count=count, limit=limit, status_code=429)
             raise HTTPException(429, "Too many requests. Please try again shortly.", headers={"Retry-After": "60"})
@@ -225,6 +234,17 @@ def create_app(settings: Settings | None = None):
         request.session["csrf_token"] = secrets.token_urlsafe(32)
         request.state.rotate_session = True
         return {"success": True}
+
+    @app.post("/api/auth/hr", dependencies=[Depends(require_csrf)])
+    @traced("auth.hr.login")
+    async def hr_password_login(body: HRLogin, request: Request):
+        await app.state.limiter.check(request, hr_login=True)
+        user = password_hr_user(settings, body.username, body.password)
+        request.session.clear()
+        request.session.update(user=user.model_dump(), csrf_token=secrets.token_urlsafe(32))
+        request.state.rotate_session = True
+        return {"user": user, "csrf_token": request.session["csrf_token"],
+                "demo_mode": settings.demo_mode, "consent_version": settings.consent_version}
 
     @app.get("/auth/{provider}/login")
     async def oidc_login(provider: Literal["linkedin", "hr"], request: Request):

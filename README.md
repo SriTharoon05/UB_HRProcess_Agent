@@ -4,7 +4,7 @@ A recruitment portal with a candidate job board, private resume uploads, and an 
 
 React communicates with FastAPI. D365 Finance & Operations stores the existing jobs, candidate/application records and core AI result. SQLite stores portal metadata and the complete evaluation, Azure Blob Storage keeps documents private, and a Redis-backed worker runs Azure OpenAI evaluations. Scores describe documented job/resume alignment. They do not automate hiring or rejection, and human review is required.
 
-**The default development workflow is explicitly labeled demo mode.** It runs without external credentials, uses fictional jobs/candidates, and lets you upload a real PDF/DOCX and explore a labeled sample evaluation. Connected adapters are implemented separately; live LinkedIn, Entra, D365, Azure OpenAI, and Blob validation requires your configuration and deployed D365 contracts.
+**The default development workflow is explicitly labeled demo mode.** Candidate demo access runs without external credentials, uses fictional jobs/candidates, and lets you upload a real PDF/DOCX and explore a labeled sample evaluation. HR sign-in uses backend-configured `HR_USERNAME`/`HR_PASSWORD`. Connected adapters are implemented separately; live LinkedIn, D365, Azure OpenAI, and Blob validation requires your configuration and deployed D365 contracts.
 
 ## What you can do
 
@@ -32,7 +32,8 @@ React communicates with FastAPI. D365 Finance & Operations stores the existing j
 flowchart LR
     Browser[Candidate / HR browser] --> React[React portal]
     React --> API[FastAPI]
-    API --> OIDC[LinkedIn / Entra OIDC]
+    API --> OIDC[LinkedIn OIDC]
+    API --> HRAuth[Environment HR credentials]
     API --> D365[D365 custom services\nBusiness records]
     API --> SQLite[SQLite portal metadata]
     API --> Blob[Private resume storage]
@@ -80,7 +81,7 @@ Keep `DEMO_MODE=true` and `APP_ENV=development` for the first run. The frontend 
 ./scripts/dev.sh
 ```
 
-Open **http://localhost:5173**. Use the labeled candidate/HR demo sign-in options, choose a job, and upload a text-based PDF or DOCX. Sample evaluation values are fixtures, not an Azure OpenAI result. API documentation is available at **http://localhost:8000/docs** in development.
+Open **http://localhost:5173**. Use the labeled candidate demo sign-in, choose a job, and upload a text-based PDF or DOCX. For HR access, set `HR_USERNAME` and `HR_PASSWORD` in `backend/.env`, restart the backend, and enter them on `/hr/login`. Sample evaluation values are fixtures, not an Azure OpenAI result. API documentation is available at **http://localhost:8000/docs** in development.
 
 To run the processes in separate terminals:
 
@@ -130,7 +131,7 @@ The complete variable reference is in [environment configuration](docs/environme
 | D365 evaluation | Three-operation core-result write to `UBHRMatchEvaluationTable` | Deploy `saveCandidateEvaluation` and configure its verified path |
 | Portal metadata/history/ranking | SQLite-backed frozen submissions, full evaluations and authorized reads | Shared durable local database, backups; existing F&O records/status edits are not imported |
 | LinkedIn | Backend OIDC authorization-code flow and session creation | Client credentials, enabled OIDC product, exact registered redirect URI |
-| HR authentication | Separate Entra OIDC flow and HR role authorization | Tenant/app registration, redirect URI, assigned application role |
+| HR authentication | Environment username/password login and server-side HR role authorization | Backend-only `HR_USERNAME` and `HR_PASSWORD` |
 | Azure OpenAI | Complete-document evidence prompt, structured output validation, evidence checks | Endpoint/key/deployment/API-version compatibility and live model smoke test |
 | Resume storage | Validated local development uploads and private Blob adapter | Private container, access controls, connection settings, retention/deletion policy |
 | Background jobs | Redis-backed processing, retries, idempotency coordination | Persistent private Redis, worker deployment and monitoring; D365 write contracts |

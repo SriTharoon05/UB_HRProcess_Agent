@@ -10,6 +10,7 @@ interface AuthValue {
   loading: boolean;
   error: Error | null;
   loginDemo: (role: "candidate" | "hr") => Promise<void>;
+  loginHR: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => void;
 }
@@ -24,6 +25,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   async function loginDemo(role: "candidate" | "hr") {
     const session = await api.demoLogin(role);
+    await client.cancelQueries();
+    client.removeQueries({
+      predicate: (item) => item.queryKey[0] !== "session",
+    });
+    client.setQueryData(["session"], session);
+  }
+  async function loginHR(username: string, password: string) {
+    const session = await api.hrLogin(username, password);
     await client.cancelQueries();
     client.removeQueries({
       predicate: (item) => item.queryKey[0] !== "session",
@@ -46,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading: query.isPending,
         error: query.error,
         loginDemo,
+        loginHR,
         logout,
         refresh: () => {
           void query.refetch();
