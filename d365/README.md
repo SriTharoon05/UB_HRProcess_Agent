@@ -11,6 +11,8 @@ The flow is **show open jobs in React â†’ submit candidate/application to F&O â†
 
 Use [TABLES.md](TABLES.md) for the complete screenshot field inventory and selected fields. This package replaces the earlier baseline-table/six-operation design. It is pasteable source, not an importable model or compiled deployable package; X++ build, database synchronization where metadata changed, and live service acceptance must take place in your F&O development environment.
 
+For the reported class/parser errors and stale requirement form bindings, follow [build-errors.md](build-errors.md). It includes the corrected locking syntax and the four exact old-to-current requirement field mappings.
+
 ## 1. Open the existing F&O project
 
 1. Open the supported Visual Studio instance on your F&O developer VM/unified development environment. It must include the Dynamics 365 Finance and Operations tools and matching platform/application metadata; a plain laptop Visual Studio 2022 installation cannot compile X++ by itself.

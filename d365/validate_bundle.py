@@ -54,6 +54,23 @@ def validate_dto(value, name, contracts):
             check(valid, f"{name}.{field}: wrong JSON type for {kind}")
 
 
+def validate_xpp_syntax_regressions(source):
+    """Catch the specific grammar errors reported by the user's F&O compiler.
+
+    These targeted guards do not replace the X++ compiler. Comments and string
+    literals are removed so examples in explanatory text do not become errors.
+    """
+    code = re.sub(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
+                  " ", source)
+    check(not re.search(r"\b(?:int|int64|str|real|boolean|date|utcDateTime)\s+index\b", code, re.IGNORECASE),
+          "X++ reserves 'index'; use a different local variable name")
+    lock_hints = {"forupdate", "optimisticlock", "pessimisticlock", "repeatableread"}
+    for statement in re.finditer(r"\bselect\b([^;]*);", code, re.IGNORECASE):
+        header = re.split(r"\bwhere\b", statement.group(1), maxsplit=1, flags=re.IGNORECASE)[0]
+        hints = set(re.findall(r"\b\w+\b", header.lower())) & lock_hints
+        check(len(hints) <= 1, f"X++ select locking hints are mutually exclusive: {sorted(hints)}")
+
+
 def validate_sources(manifest, schema):
     contracts = manifest["contracts"]
     for name, contract in contracts.items():
@@ -84,6 +101,7 @@ def validate_sources(manifest, schema):
           "No new EDTs or enums are authorized")
 
     service = (BUNDLE / "xpp/UBHRPortalService.xpp").read_text(encoding="utf-8")
+    validate_xpp_syntax_regressions(service)
     check(service.count("[SysEntryPointAttribute(true)]") == 3, "Expected three entry points")
     for operation, info in manifest["operations"].items():
         parameter = "" if info["request"] is None else f'{info["request"]} _request'

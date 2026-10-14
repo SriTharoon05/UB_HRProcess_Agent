@@ -64,7 +64,8 @@ public final class UBHRPortalService
             ttsBegin;
             // SQLite freezes ApplicationId before its first HTTP attempt. A
             // unique DB index makes a lost acknowledgement retry the same row.
-            select firstOnly forUpdate pessimisticLock application
+            application.concurrencyModel(ConcurrencyModel::Pessimistic);
+            select firstOnly forUpdate application
                 where application.ApplicationId == _request.parmApplicationId();
             if (application.RecId)
             {
@@ -86,7 +87,8 @@ public final class UBHRPortalService
                 return result;
             }
 
-            select firstOnly forUpdate pessimisticLock requirement
+            requirement.concurrencyModel(ConcurrencyModel::Pessimistic);
+            select firstOnly forUpdate requirement
                 where requirement.RequirementId == _request.parmRequirementId();
             if (!requirement.RecId
                 || !this.sameText(requirement.RequirementId, _request.parmRequirementId())
@@ -95,7 +97,8 @@ public final class UBHRPortalService
                 throw error("The requirement is not accepting applications.");
             }
 
-            select firstOnly forUpdate pessimisticLock candidate
+            candidate.concurrencyModel(ConcurrencyModel::Pessimistic);
+            select firstOnly forUpdate candidate
                 where candidate.IdentityKey == identityKey;
             if (candidate.RecId)
             {
@@ -211,7 +214,8 @@ public final class UBHRPortalService
             ttsBegin;
             // All writers lock the parent first, serializing evaluation saves
             // for this application and keeping one current evaluation row.
-            select firstOnly forUpdate pessimisticLock application
+            application.concurrencyModel(ConcurrencyModel::Pessimistic);
+            select firstOnly forUpdate application
                 where application.ApplicationId == _request.parmApplicationId();
             if (!application.RecId
                 || !this.sameText(application.ApplicationId, _request.parmApplicationId())
@@ -220,7 +224,8 @@ public final class UBHRPortalService
                 throw error("ApplicationId and RequirementId must identify the same existing application.");
             }
 
-            select firstOnly forUpdate pessimisticLock evaluation
+            evaluation.concurrencyModel(ConcurrencyModel::Pessimistic);
+            select firstOnly forUpdate evaluation
                 where evaluation.EvaluationId == _request.parmEvaluationId();
             if (evaluation.RecId
                 && (!this.sameText(evaluation.EvaluationId, _request.parmEvaluationId())
@@ -231,7 +236,8 @@ public final class UBHRPortalService
             }
             if (!evaluation.RecId)
             {
-                select firstOnly forUpdate pessimisticLock evaluation
+                evaluation.concurrencyModel(ConcurrencyModel::Pessimistic);
+                select firstOnly forUpdate evaluation
                     where evaluation.ApplicationId == application.ApplicationId;
                 if (evaluation.RecId && !this.sameText(evaluation.EvaluationId, _request.parmEvaluationId()))
                 {
@@ -441,7 +447,7 @@ public final class UBHRPortalService
     {
         DictField field = new DictField(_record.TableId, _fieldId);
         DictEnum enumeration;
-        int index;
+        int enumElementIndex;
         int value;
         if (field.baseType() == Types::String)
         {
@@ -451,11 +457,11 @@ public final class UBHRPortalService
         {
             enumeration = new DictEnum(field.enumId());
             value = _record.(_fieldId);
-            for (index = 0; index < enumeration.values(); index++)
+            for (enumElementIndex = 0; enumElementIndex < enumeration.values(); enumElementIndex++)
             {
-                if (enumeration.index2Value(index) == value)
+                if (enumeration.index2Value(enumElementIndex) == value)
                 {
-                    return enumeration.index2Symbol(index);
+                    return enumeration.index2Symbol(enumElementIndex);
                 }
             }
             throw error(strFmt("%1.%2 contains an unknown enum value.", tableId2Name(_record.TableId), field.name()));
@@ -467,7 +473,7 @@ public final class UBHRPortalService
     {
         DictField field = new DictField(_record.TableId, _fieldId);
         DictEnum enumeration;
-        int index;
+        int enumElementIndex;
         if (field.baseType() == Types::String)
         {
             this.writeText(_record, _fieldId, _symbol);
@@ -476,11 +482,11 @@ public final class UBHRPortalService
         if (field.baseType() == Types::Enum)
         {
             enumeration = new DictEnum(field.enumId());
-            for (index = 0; index < enumeration.values(); index++)
+            for (enumElementIndex = 0; enumElementIndex < enumeration.values(); enumElementIndex++)
             {
-                if (this.sameText(enumeration.index2Symbol(index), _symbol))
+                if (this.sameText(enumeration.index2Symbol(enumElementIndex), _symbol))
                 {
-                    _record.(_fieldId) = enumeration.index2Value(index);
+                    _record.(_fieldId) = enumeration.index2Value(enumElementIndex);
                     return;
                 }
             }
