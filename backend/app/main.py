@@ -22,6 +22,7 @@ from app.config import Settings, get_settings
 from app.demo import DemoAdapter
 from app.errors import IntegrationError, ResumeValidationError
 from app.models import Application, Job, User
+from app.observability import RequestLoggingMiddleware, configure_logging, log_context, log_event, stage, traced
 from app.profile import valid_contact_email
 from app.queue import SubmissionCoordinator, submission_fingerprint
 from app.metadata import SQLiteMetadata
@@ -41,17 +42,22 @@ class BodyLimitMiddleware:
         if scope["type"] != "http" or scope.get("path") != "/api/applications" or scope.get("method") != "POST":
             return await self.app(scope, receive, send)
         chunks, size = [], 0
+        log_event("upload.receive", "start", max_bytes=self.max_bytes)
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
+                log_event("upload.receive", "cancelled", bytes_count=size, reason="client_disconnected")
                 return
             size += len(message.get("body", b""))
             if size > self.max_bytes:
+                log_event("upload.receive", "failed", level=logging.WARNING, bytes_count=size,
+                          max_bytes=self.max_bytes, reason="size_limit", status_code=413)
                 response = JSONResponse({"detail": "Resume upload exceeds the size limit"}, status_code=413)
                 return await response(scope, receive, send)
             chunks.append(message)
             if not message.get("more_body"):
                 break
+        log_event("upload.receive", "completed", bytes_count=size)
         index = 0
 
         async def replay():
@@ -70,6 +76,7 @@ class DemoLogin(BaseModel):
     role: Literal["candidate", "hr"]
 
 
+@traced("application.contact.validate")
 def validate_application_contact(candidate_name: str, email: str) -> tuple[str, str]:
     """Validate application contact without treating it as authenticated identity."""
     candidate_name, email = candidate_name.strip(), email.strip()
@@ -79,8 +86,10 @@ def validate_application_contact(candidate_name: str, email: str) -> tuple[str, 
         or not candidate_name.isprintable()
         or not any(character.isalpha() for character in candidate_name)
     ):
+        log_event("application.contact.validate", "rejected", reason="name_invalid", status_code=422)
         raise HTTPException(422, "Enter your full name using up to 200 characters")
     if not valid_contact_email(email):
+        log_event("application.contact.validate", "rejected", reason="email_invalid", status_code=422)
         raise HTTPException(422, "Enter a valid contact email using up to 320 characters")
     return candidate_name, email
 
@@ -90,6 +99,7 @@ class RateLimiter:
         self.settings, self.redis = settings, redis
         self.memory = {}
 
+    @traced("http.rate_limit")
     async def check(self, request, upload=False):
         address = request.client.host if request.client else "unknown"
         # Do not trust forwarded headers supplied by public clients.
@@ -105,27 +115,32 @@ class RateLimiter:
             self.memory[key] = count
         limit = self.settings.upload_rate_limit if upload else self.settings.public_rate_limit
         if count > limit:
+            log_event("http.rate_limit", "rejected", count=count, limit=limit, status_code=429)
             raise HTTPException(429, "Too many requests. Please try again shortly.", headers={"Retry-After": "60"})
 
 
 def create_app(settings: Settings | None = None):
     settings = settings or get_settings()
+    configure_logging(settings.log_level)
     session_store = SessionStore(settings)
 
     @asynccontextmanager
     async def lifespan(app):
-        metadata = getattr(app.state.adapter, "metadata", None)
-        if isinstance(metadata, SQLiteMetadata):
-            await metadata.initialize()
-        if not settings.demo_mode:
-            app.state.redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-            await app.state.redis.ping()
-            session_store.redis = app.state.redis
-            app.state.coordinator.redis = app.state.redis
-            app.state.limiter.redis = app.state.redis
+        with stage("api.startup", mode="demo" if settings.demo_mode else "connected"):
+            metadata = getattr(app.state.adapter, "metadata", None)
+            if isinstance(metadata, SQLiteMetadata):
+                await metadata.initialize()
+            if not settings.demo_mode:
+                with stage("redis.connect"):
+                    app.state.redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+                    await app.state.redis.ping()
+                    session_store.redis = app.state.redis
+                    app.state.coordinator.redis = app.state.redis
+                    app.state.limiter.redis = app.state.redis
         yield
         if app.state.redis:
-            await app.state.redis.aclose()
+            with stage("api.shutdown"):
+                await app.state.redis.aclose()
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
@@ -144,22 +159,29 @@ def create_app(settings: Settings | None = None):
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key"],
     )
+    app.add_middleware(RequestLoggingMiddleware, routes=app.routes)
 
     @app.exception_handler(IntegrationError)
     async def integration_error(request, exc):
+        log_event("http.integration", "failed", level=logging.ERROR, exception_type=type(exc).__name__,
+                  status_code=exc.status_code, retryable=exc.retryable)
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
+        log_event("http.validation", "failed", level=logging.WARNING, status_code=422,
+                  exception_type=type(exc).__name__, reason="required_fields_or_types")
         return JSONResponse(
             {"detail": "Request validation failed. Check the required fields and file type."}, status_code=422
         )
 
     @app.exception_handler(Exception)
     async def unexpected_error(request, exc):
-        logger.error("request_failed", extra={"error_type": type(exc).__name__})
+        with log_context(request_id=getattr(request.state, "request_id", None)):
+            log_event("http.unexpected", "failed", level=logging.ERROR, exception_type=type(exc).__name__, status_code=503)
         return JSONResponse(
-            {"detail": "The service could not complete this request. Please try again."}, status_code=503
+            {"detail": "The service could not complete this request. Please try again."}, status_code=503,
+            headers={"X-Request-ID": request.state.request_id} if getattr(request.state, "request_id", None) else None,
         )
 
     @app.get("/api/health")
@@ -217,6 +239,7 @@ def create_app(settings: Settings | None = None):
             status_code=303,
         )
 
+    @traced("jobs.list")
     async def jobs_list(request, search, department, location, work_mode, employment_type):
         await app.state.limiter.check(request)
         jobs = await app.state.adapter.get_open_requirements()
@@ -236,6 +259,7 @@ def create_app(settings: Settings | None = None):
                 for j in jobs
                 if needle in " ".join([j.title, j.description, j.department, *j.required_skills]).casefold()
             ]
+        log_event("jobs.list", "filtered", record_count=len(jobs))
         return jobs
 
     @app.get("/api/jobs")
@@ -261,11 +285,13 @@ def create_app(settings: Settings | None = None):
         return await jobs_list(request, search, department, location, work_mode, employment_type)
 
     async def get_job(requirement_id):
-        jobs = await app.state.adapter.get_open_requirements()
-        job = next((j for j in jobs if j.requirement_id == requirement_id and j.status.casefold() == "open"), None)
-        if not job:
-            raise HTTPException(404, "Open job requirement not found")
-        return job
+        with log_context(requirement_id=requirement_id), stage("job.lookup"):
+            jobs = await app.state.adapter.get_open_requirements()
+            job = next((j for j in jobs if j.requirement_id == requirement_id and j.status.casefold() == "open"), None)
+            if not job:
+                log_event("job.lookup", "rejected", reason="not_open_or_not_found", status_code=404)
+                raise HTTPException(404, "Open job requirement not found")
+            return job
 
     @app.get("/api/jobs/{requirement_id}")
     async def job_detail(requirement_id: str, request: Request):
@@ -273,6 +299,7 @@ def create_app(settings: Settings | None = None):
         return await get_job(requirement_id)
 
     @app.post("/api/applications", dependencies=[Depends(require_csrf)])
+    @traced("application.submit")
     async def submit_application(
         request: Request,
         user: Annotated[User, Depends(candidate_user)],
@@ -287,9 +314,12 @@ def create_app(settings: Settings | None = None):
         idempotency_key: Annotated[str | None, Header()] = None,
     ):
         await app.state.limiter.check(request, upload=True)
+        log_event("application.validate", "start", requirement_id=requirement_id)
         if not idempotency_key or not re.fullmatch(r"[A-Za-z0-9_.:-]{8,128}", idempotency_key):
+            log_event("application.validate", "failed", reason="idempotency_key_invalid", status_code=422)
             raise HTTPException(422, "A stable Idempotency-Key of 8 to 128 characters is required")
         if not consent_accepted or consent_version != settings.consent_version:
+            log_event("application.validate", "failed", reason="consent_required", status_code=422)
             raise HTTPException(422, "Accept the current consent notice before applying")
         form = await request.form()
         candidate_name, email = validate_application_contact(
@@ -298,6 +328,7 @@ def create_app(settings: Settings | None = None):
         )
         application_user = user.model_copy(update={"name": candidate_name, "email": email})
         if len(phone) > 30 or not re.fullmatch(r"[0-9+() .-]*", phone):
+            log_event("application.validate", "failed", reason="phone_invalid", status_code=422)
             raise HTTPException(422, "Enter a valid phone number")
         if linkedin_url:
             parsed = urlparse(linkedin_url)
@@ -308,15 +339,19 @@ def create_app(settings: Settings | None = None):
                 or parsed.username
                 or parsed.password
             ):
+                log_event("application.validate", "failed", reason="linkedin_url_invalid", status_code=422)
                 raise HTTPException(422, "LinkedIn profile must be an HTTPS linkedin.com URL")
         data = await resume.read(settings.max_resume_size_mb * 1024 * 1024 + 1)
         filename = PurePath((resume.filename or "resume").replace("\\", "/")).name
         if len(filename) > 150 or any(ord(c) < 32 for c in filename):
+            log_event("application.validate", "failed", reason="filename_invalid", status_code=422)
             raise HTTPException(422, "Resume filename is invalid")
         try:
             app.state.resumes.validate_upload(data, filename, resume.content_type or "")
         except ResumeValidationError as exc:
             raise HTTPException(422, str(exc)) from None
+        log_event("application.validate", "completed", requirement_id=requirement_id,
+                  bytes_count=len(data), consent_accepted=True)
         fingerprint = submission_fingerprint(
             requirement_id, data, phone, linkedin_url, consent_version, candidate_name=candidate_name, email=email
         )
@@ -324,6 +359,8 @@ def create_app(settings: Settings | None = None):
         if app.state.coordinator.metadata:
             existing = await app.state.coordinator.load(app.state.coordinator.key(application_user, idempotency_key))
         if existing:
+            log_event("application.retry", "reused", requirement_id=requirement_id,
+                      application_id=existing.get("application_id"))
             # A frozen retry can finish a previously accepted submission after the job closes.
             job = Job.model_validate(existing["job_snapshot"])
         else:
@@ -334,14 +371,16 @@ def create_app(settings: Settings | None = None):
                     if deadline.tzinfo is None:
                         deadline = deadline.replace(tzinfo=timezone.utc)
                     if deadline < datetime.now(timezone.utc):
+                        log_event("job.eligibility", "failed", reason="closed", status_code=409)
                         raise HTTPException(409, "This job requirement is no longer accepting applications")
                 except ValueError:
                     raise IntegrationError(
                         "Job service returned an invalid application deadline", retryable=False
                     ) from None
-        return await app.state.coordinator.submit(
-            application_user, idempotency_key, fingerprint, job, data, filename, phone, linkedin_url, consent_version
-        )
+        with log_context(requirement_id=requirement_id):
+            return await app.state.coordinator.submit(
+                application_user, idempotency_key, fingerprint, job, data, filename, phone, linkedin_url, consent_version
+            )
 
     async def processing_status(record):
         if app.state.redis and not isinstance(getattr(app.state.adapter, "metadata", None), SQLiteMetadata):
@@ -351,6 +390,7 @@ def create_app(settings: Settings | None = None):
         return record
 
     @app.get("/api/me/applications")
+    @traced("applications.history")
     async def my_applications(user: Annotated[User, Depends(candidate_user)]):
         records = await app.state.adapter.get_my_applications(user)
         result = []
@@ -362,6 +402,7 @@ def create_app(settings: Settings | None = None):
         return result
 
     @app.get("/api/applications/{application_id}")
+    @traced("applications.detail")
     async def own_application(application_id: str, user: Annotated[User, Depends(candidate_user)]):
         record = await app.state.adapter.get_application(application_id)
         if record.owner_sub != user.sub or record.owner_issuer != user.issuer:
@@ -369,6 +410,7 @@ def create_app(settings: Settings | None = None):
         return Application.model_validate((await processing_status(record)).model_dump())
 
     @app.get("/api/hr/jobs/{requirement_id}/candidates", dependencies=[Depends(hr_user)])
+    @traced("hr.candidates.list")
     async def candidates(requirement_id: str, limit: int = 25):
         if limit < 1 or limit > 100:
             raise HTTPException(422, "Candidate limit must be between 1 and 100")
@@ -382,6 +424,7 @@ def create_app(settings: Settings | None = None):
         }
 
     @app.get("/api/hr/jobs/{requirement_id}/candidates/{application_id}", dependencies=[Depends(hr_user)])
+    @traced("hr.candidates.detail")
     async def candidate_detail(requirement_id: str, application_id: str):
         if not settings.demo_mode and settings.d365_contract_mode == "legacy" and not settings.d365_application_path:
             records = await app.state.adapter.get_top_candidates(requirement_id, 100)
@@ -395,6 +438,7 @@ def create_app(settings: Settings | None = None):
         return (await processing_status(record)).public_dict()
 
     @app.get("/api/hr/applications/{application_id}/resume", dependencies=[Depends(hr_user)])
+    @traced("hr.resume.download")
     async def resume_download(application_id: str, requirement_id: str = ""):
         if not settings.demo_mode and settings.d365_contract_mode == "legacy" and not settings.d365_application_path:
             if not requirement_id:

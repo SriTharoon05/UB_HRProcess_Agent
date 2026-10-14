@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app.errors import IntegrationError
+from app.observability import log_event, traced
 
 
 def encode(value):
@@ -46,6 +47,7 @@ class SQLiteMetadata:
         finally:
             connection.close()
 
+    @traced("sqlite.initialize")
     def _initialize(self):
         with self.connection() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
@@ -74,11 +76,13 @@ class SQLiteMetadata:
                 PRAGMA user_version=1;
             """)
         self._initialized = True
+        log_event("sqlite.schema", "validated", schema_version=1, storage="sqlite")
 
     async def initialize(self):
         if not self._initialized:
             await asyncio.to_thread(self._initialize)
 
+    @traced("sqlite.transaction")
     async def run(self, callback):
         await self.initialize()
 
@@ -88,6 +92,7 @@ class SQLiteMetadata:
 
         return await asyncio.to_thread(perform)
 
+    @traced("sqlite.submission.reserve")
     async def reserve(self, key: str, record: dict) -> tuple[dict, bool]:
         """Freeze one ApplicationId/payload per stable caller submission key."""
         def perform(connection):
@@ -120,12 +125,14 @@ class SQLiteMetadata:
             )
         return await self._one("SELECT record_json FROM applications WHERE application_id=?", (application_id,))
 
+    @traced("sqlite.read")
     async def _one(self, query, parameters):
         def perform(connection):
             row = connection.execute(query, parameters).fetchone()
             return json.loads(row[0]) if row else None
         return await self.run(perform)
 
+    @traced("sqlite.submission.update")
     async def update_submission(self, key: str, record: dict):
         def perform(connection):
             connection.execute("BEGIN IMMEDIATE")
@@ -142,6 +149,7 @@ class SQLiteMetadata:
             connection.execute("UPDATE applications SET record_json=? WHERE submission_key=?", (encode(record), key))
         await self.run(perform)
 
+    @traced("sqlite.submissions.list")
     async def submissions(self, *, company: str | None = None, owner: tuple[str, str] | None = None,
                           requirement_id: str | None = None):
         clauses, parameters = [], []
@@ -161,9 +169,11 @@ class SQLiteMetadata:
             return [(row[0], json.loads(row[1])) for row in connection.execute(query, parameters)]
         return await self.run(perform)
 
+    @traced("sqlite.evaluation.read")
     async def get_evaluation_state(self, application_id: str):
         return await self._one("SELECT state_json FROM evaluation_states WHERE application_id=?", (application_id,))
 
+    @traced("sqlite.evaluation.save")
     async def save_evaluation_state(self, application_id: str, state: dict):
         def perform(connection):
             connection.execute(

@@ -15,9 +15,7 @@ from fastapi import HTTPException
 
 from app.errors import IntegrationError
 from app.metadata import SQLiteMetadata, encode
-
-logger = logging.getLogger(__name__)
-
+from app.observability import log_context, log_event, stage, traced
 
 class SubmissionCoordinator:
     def __init__(self, settings, adapter, resumes, redis=None):
@@ -37,6 +35,7 @@ class SubmissionCoordinator:
             digest = hashlib.sha256(f"{user.issuer}|{user.sub}|{idempotency_key}".encode()).hexdigest()
         return f"{self.settings.redis_prefix}:submission:{digest}"
 
+    @traced("submission.outbox_load")
     async def load(self, key):
         if self.metadata:
             return await self.metadata.get_submission(key)
@@ -45,7 +44,10 @@ class SubmissionCoordinator:
             return json.loads(value) if value else None
         return self.memory.get(key)
 
+    @traced("submission.outbox_persist")
     async def persist(self, key, record):
+        log_event("submission.outbox_state", "saving", state=record.get("stage"),
+                  storage="sqlite" if self.metadata else "redis" if self.redis else "memory")
         if self.metadata:
             await self.metadata.update_submission(key, record)
             return
@@ -54,8 +56,10 @@ class SubmissionCoordinator:
         else:
             self.memory[key] = record
 
+    @traced("submission.evaluation_enqueue")
     async def enqueue(self, key, record):
         if not self.redis:
+            log_event("submission.evaluation_enqueue", "skipped", reason="redis_not_configured")
             return
         # The outbox is already durable before attempting enqueue. A periodic
         # worker reconciliation recovers a crash between D365 acceptance and enqueue.
@@ -71,48 +75,77 @@ class SubmissionCoordinator:
         )
         record["stage"] = "queued"
         await self.persist(key, record)
+        log_event("submission.evaluation_enqueue", "queued", status="Pending")
 
     async def finish(self, key, record):
+        with log_context(application_id=record.get("application_id"), requirement_id=record.get("requirement_id")):
+            return await self._finish(key, record)
+
+    @traced("submission.finish")
+    async def _finish(self, key, record):
+        log_event("submission.outbox_resume", "start", state=record["stage"])
         if record["stage"] == "ready":
-            result = await self.adapter.submit_application(record["payload"])
-            if not result.get("application_id"):
-                raise IntegrationError("Application service did not return an identifier", retryable=False)
-            if self.metadata and result["application_id"] != record["application_id"]:
-                raise IntegrationError("D365 changed the frozen ApplicationId", retryable=False)
+            with stage("submission.d365_submit"):
+                result = await self.adapter.submit_application(record["payload"])
+                if not result.get("application_id"):
+                    raise IntegrationError("Application service did not return an identifier", retryable=False)
+                if self.metadata and result["application_id"] != record["application_id"]:
+                    raise IntegrationError("D365 changed the frozen ApplicationId", retryable=False)
             record.update(application_id=str(result["application_id"]), stage="accepted")
             if self.metadata:
                 record.update(candidate_id=result["candidate_id"], hr_status="Submitted")
-            await self.persist(key, record)
-        if record["stage"] == "accepted":
-            await self.enqueue(key, record)
-        state = await self.metadata.get_evaluation_state(record["application_id"]) if self.metadata else None
-        return {
-            "success": True,
-            "application_id": record["application_id"],
-            "ai_status": "Completed" if self.settings.demo_mode else (state or {}).get("status", "Pending"),
-            "message": "Application submitted. Demo evaluation is a fictional sample."
-            if self.settings.demo_mode
-            else "Application submitted. Evidence evaluation is queued for human review.",
-        }
+            with log_context(application_id=record["application_id"]):
+                await self.persist(key, record)
+                log_event("submission.application_acknowledgement", "completed", state="accepted")
+        with log_context(application_id=record["application_id"]):
+            if record["stage"] == "accepted":
+                await self.enqueue(key, record)
+            state = await self.metadata.get_evaluation_state(record["application_id"]) if self.metadata else None
+            return {
+                "success": True,
+                "application_id": record["application_id"],
+                "ai_status": "Completed" if self.settings.demo_mode else (state or {}).get("status", "Pending"),
+                "message": "Application submitted. Demo evaluation is a fictional sample."
+                if self.settings.demo_mode
+                else "Application submitted. Evidence evaluation is queued for human review.",
+            }
 
     async def submit(
         self, user, idempotency_key, fingerprint, job, data, filename, phone, linkedin_url, consent_version
     ):
+        with log_context(requirement_id=job.requirement_id):
+            return await self._submit(user, idempotency_key, fingerprint, job, data, filename, phone,
+                                      linkedin_url, consent_version)
+
+    @traced("submission.coordinate")
+    async def _submit(
+        self, user, idempotency_key, fingerprint, job, data, filename, phone, linkedin_url, consent_version
+    ):
         key = self.key(user, idempotency_key)
+        log_event("submission.lock", "start", storage="redis" if self.redis else "memory")
         if self.redis:
             lock = self.redis.lock(key + ":lock", timeout=120, blocking_timeout=1)
             if not await lock.acquire():
+                log_event("submission.lock", "rejected", level=logging.WARNING, lock_acquired=False,
+                          reason="submission_in_progress")
                 raise HTTPException(409, "This submission is already in progress. Retry with the same Idempotency-Key.")
         else:
             lock = self.locks.setdefault(key, asyncio.Lock())
             await lock.acquire()
+        log_event("submission.lock", "completed", lock_acquired=True)
         try:
             record = await self.load(key)
             if record:
+                log_event("submission.idempotency", "reused", application_id=record.get("application_id"),
+                          state=record["stage"])
                 if record["fingerprint"] != fingerprint:
+                    log_event("submission.idempotency", "rejected", level=logging.WARNING,
+                              reason="payload_mismatch")
                     raise HTTPException(409, "Idempotency-Key was already used for a different application")
                 return await self.finish(key, record)
+            log_event("submission.resume_store", "start", bytes_count=len(data))
             resume_ref = await self.resumes.store(data, filename)
+            log_event("submission.resume_store", "completed", bytes_count=len(data))
             job_hash = hashlib.sha256(job.model_dump_json().encode()).hexdigest()
             payload = {
                 "requirement_id": job.requirement_id,
@@ -152,18 +185,31 @@ class SubmissionCoordinator:
                 record.update(application_id=application_id, company=self.settings.d365_company,
                               payload_sha256=hashlib.sha256(encode(payload).encode()).hexdigest())
                 try:
+                    log_event("submission.sqlite_reserve", "start", application_id=application_id)
                     record, created = await self.metadata.reserve(key, record)
-                except Exception:
+                    log_event("submission.sqlite_reserve", "completed", application_id=record["application_id"],
+                              cached=not created, state=record["stage"])
+                except Exception as exc:
+                    log_event("submission.sqlite_reserve", "failed", level=logging.ERROR,
+                              exception_type=type(exc).__name__)
+                    log_event("submission.resume_cleanup", "start", reason="reservation_failed")
                     await self.resumes.delete(resume_ref)
+                    log_event("submission.resume_cleanup", "completed", reason="reservation_failed")
                     raise
                 if not created:
                     # A competing process reserved the immutable input first.
+                    log_event("submission.resume_cleanup", "start", reason="competing_reservation")
                     await self.resumes.delete(resume_ref)
+                    log_event("submission.resume_cleanup", "completed", reason="competing_reservation")
             else:
                 try:
                     await self.persist(key, record)
-                except Exception:
+                except Exception as exc:
+                    log_event("submission.outbox_persist", "failed", level=logging.ERROR,
+                              exception_type=type(exc).__name__)
+                    log_event("submission.resume_cleanup", "start", reason="persistence_failed")
                     await self.resumes.delete(resume_ref)
+                    log_event("submission.resume_cleanup", "completed", reason="persistence_failed")
                     raise
             return await self.finish(key, record)
         finally:
@@ -172,48 +218,67 @@ class SubmissionCoordinator:
                     await lock.release()
                 else:
                     lock.release()
-            except Exception:
+                log_event("submission.lock_release", "completed")
+            except Exception as exc:
+                log_event("submission.lock_release", "failed", level=logging.WARNING,
+                          exception_type=type(exc).__name__)
                 pass
 
+    @traced("submission.reconciliation")
     async def reconcile(self):
         if not self.redis:
+            log_event("submission.reconciliation", "skipped", reason="redis_not_configured")
             return
         if self.metadata:
             entries = await self.metadata.submissions(company=self.settings.d365_company)
         else:
             entries = [(key.decode() if isinstance(key, bytes) else key, None)
                        async for key in self.redis.scan_iter(match=f"{self.settings.redis_prefix}:submission:*")]
+        log_event("submission.reconciliation_scan", "completed", count=len(entries))
         for key, _ in entries:
             if key.endswith(":lock"):
                 continue
             record = await self.load(key)
             if not record or record.get("stage") not in {"ready", "accepted", "queued"}:
                 continue
-            if record["stage"] == "queued":
-                application_id = record["application_id"]
-                if self.metadata:
-                    state = await self.metadata.get_evaluation_state(application_id) or {}
-                else:
-                    evaluation = await self.redis.get(f"{self.settings.redis_prefix}:evaluation:{application_id}")
-                    state = json.loads(evaluation) if evaluation else {}
-                if state.get("status") in {"Completed", "Failed"}:
-                    continue
-                if await self.redis.exists(
-                    f"arq:job:evaluation:{application_id}", f"arq:result:evaluation:{application_id}"
-                ):
-                    continue
-                record["stage"] = "accepted"
-            lock = self.redis.lock(key + ":lock", timeout=120, blocking_timeout=0)
-            if await lock.acquire():
-                try:
-                    await self.finish(key, record)
-                except Exception:
-                    # Do not log candidate data or external responses. Keep
-                    # durable state to permit a later recovery attempt.
-                    logger.warning("submission_recovery_pending")
-                finally:
-                    await lock.release()
+            with log_context(application_id=record.get("application_id"), requirement_id=record.get("requirement_id")):
+                await self._recover_entry(key, record)
 
+    async def _recover_entry(self, key, record):
+        log_event("submission.reconciliation_entry", "start", state=record["stage"])
+        if record["stage"] == "queued":
+            application_id = record["application_id"]
+            if self.metadata:
+                state = await self.metadata.get_evaluation_state(application_id) or {}
+            else:
+                evaluation = await self.redis.get(f"{self.settings.redis_prefix}:evaluation:{application_id}")
+                state = json.loads(evaluation) if evaluation else {}
+            if state.get("status") in {"Completed", "Failed"}:
+                log_event("submission.reconciliation_entry", "skipped", reason="evaluation_terminal",
+                          status=state["status"])
+                return
+            if await self.redis.exists(
+                f"arq:job:evaluation:{application_id}", f"arq:result:evaluation:{application_id}"
+            ):
+                log_event("submission.reconciliation_entry", "skipped", reason="queue_job_exists")
+                return
+            record["stage"] = "accepted"
+            log_event("submission.reconciliation_entry", "recovering", reason="queue_job_missing")
+        lock = self.redis.lock(key + ":lock", timeout=120, blocking_timeout=0)
+        if await lock.acquire():
+            try:
+                await self.finish(key, record)
+                log_event("submission.reconciliation_entry", "completed", state=record["stage"])
+            except Exception as exc:
+                # Do not log candidate data or external responses. Keep
+                # durable state to permit a later recovery attempt.
+                log_event("submission.reconciliation_entry", "failed", level=logging.WARNING,
+                          reason="recovery_pending", exception_type=type(exc).__name__)
+            finally:
+                await lock.release()
+        else:
+            log_event("submission.reconciliation_entry", "skipped", reason="submission_locked",
+                      lock_acquired=False)
 
 def submission_fingerprint(requirement_id, data, phone, linkedin_url, consent_version, *, candidate_name=None, email=None):
     fields = [requirement_id, phone, linkedin_url, consent_version]

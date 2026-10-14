@@ -16,10 +16,10 @@ import httpx
 import msal
 from pydantic import ValidationError
 
+from app.d365_diagnostics import d365_error_diagnostics
 from app.errors import ConfigurationError, IntegrationError
 from app.models import Candidate, Evaluation, Job, LinkedInProfile, User
-
-logger = logging.getLogger(__name__)
+from app.observability import log_event, log_request_shape, traced
 
 PATHS = {
     "get_open_requirements": "d365_requirement_path",
@@ -106,23 +106,31 @@ class D365Service:
         self._expires_at = 0.0
         self._token_lock = asyncio.Lock()
 
+    @traced("d365.config")
     def _check_config(self) -> None:
         if not self.settings.d365_enabled:
+            log_event("d365.config", "failed", level=logging.ERROR, issue_code="d365_disabled")
             raise ConfigurationError("D365 is disabled. Configure D365_ENABLED for connected mode.")
         required = ["d365_base_url", "d365_tenant_id", "d365_client_id", "d365_client_secret"]
         if any(not getattr(self.settings, key, "") for key in required):
+            log_event("d365.config", "failed", level=logging.ERROR, issue_code="d365_credentials_missing")
             raise ConfigurationError("D365 base URL and Entra client credentials are required.")
         parsed = urlparse(self.settings.d365_base_url)
         if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
+            log_event("d365.config", "failed", level=logging.ERROR, issue_code="d365_resource_url_invalid")
             raise ConfigurationError("D365_BASE_URL must be an HTTPS resource URL.")
         if not re.fullmatch(r"[a-zA-Z0-9.-]+", self.settings.d365_tenant_id):
+            log_event("d365.config", "failed", level=logging.ERROR, issue_code="d365_tenant_invalid")
             raise ConfigurationError("D365_TENANT_ID must be a tenant ID or domain.")
 
+    @traced("d365.auth")
     async def get_access_token(self, force_refresh: bool = False) -> str:
         self._check_config()
         async with self._token_lock:
             if not force_refresh and self._token and time.monotonic() < self._expires_at:
+                log_event("d365.auth.cache", "hit", token_cache_hit=True)
                 return self._token
+            log_event("d365.auth.cache", "miss", token_cache_hit=False, force_refresh=force_refresh)
             scope = [f"{self.settings.d365_base_url.rstrip('/')}/.default"]
 
             def acquire() -> dict:
@@ -138,16 +146,27 @@ class D365Service:
                 return self._msal.acquire_token_for_client(scopes=scope)
 
             try:
+                log_event("d365.auth.acquire", "start", force_refresh=force_refresh)
                 response = await asyncio.to_thread(acquire)
             except Exception as exc:
+                log_event("d365.auth.acquire", "failed", level=logging.ERROR,
+                          issue_code="entra_connection_failed")
                 raise IntegrationError("D365 authentication could not be completed") from exc
             token = response.get("access_token")
             if not token:
+                issue = response.get("error")
+                known_errors = {"invalid_client", "invalid_scope", "invalid_grant", "unauthorized_client",
+                                "access_denied", "temporarily_unavailable", "server_error", "interaction_required"}
+                code = f"entra_{issue}" if isinstance(issue, str) and issue in known_errors else "entra_token_missing"
+                log_event("d365.auth.acquire", "failed", level=logging.ERROR, issue_code=code,
+                          hint="Check Entra app credentials, D365 application registration and API permissions; token response text is suppressed.")
                 raise IntegrationError("D365 authentication failed; check Entra credentials and permissions", retryable=False)
             self._token = token
             self._expires_at = time.monotonic() + max(0, int(response.get("expires_in", 300)) - 60)
+            log_event("d365.auth.acquire", "completed", force_refresh=force_refresh)
             return token
 
+    @traced("d365.request.mapping")
     def _body(self, operation: str, payload: dict[str, Any]) -> dict:
         mapping = dict(REQUEST_FIELDS)
         mapping.update(getattr(self.settings, "d365_request_field_maps", {}).get(operation, {}))
@@ -173,15 +192,23 @@ class D365Service:
         wrapper = wrappers.get(operation, default)
         return {wrapper: mapped} if wrapper else mapped
 
+    @traced("d365.operation")
     async def call_d365_service(self, operation: str, payload: dict[str, Any] | None = None) -> Any:
+        log_event("d365.operation.config", "start", operation=operation)
         setting = PATHS.get(operation)
         if setting is None:
+            log_event("d365.operation.config", "failed", level=logging.ERROR, issue_code="d365_operation_unsupported")
             raise ConfigurationError("Unsupported D365 operation")
         path = getattr(self.settings, setting, "")
         if not path:
+            log_event("d365.operation.config", "failed", level=logging.ERROR,
+                      operation=operation, issue_code="d365_operation_path_missing")
             raise ConfigurationError(f"{setting.upper()} is not configured; deploy or configure the D365 operation.")
         if not path.startswith("/") or path.startswith("//") or "?" in path or "#" in path:
+            log_event("d365.operation.config", "failed", level=logging.ERROR,
+                      operation=operation, issue_code="d365_operation_path_invalid")
             raise ConfigurationError(f"{setting.upper()} must be a relative service path beginning with '/'.")
+        log_event("d365.operation.config", "completed", operation=operation, company=self.settings.d365_company)
         token = await self.get_access_token()
         correlation_id = str(uuid.uuid4())
         headers = {"Authorization": f"Bearer {token}", "X-Correlation-ID": correlation_id}
@@ -191,24 +218,73 @@ class D365Service:
         url = f"{self.settings.d365_base_url.rstrip('/')}{path}"
 
         async def perform(client: httpx.AsyncClient) -> Any:
+            started = time.monotonic()
             try:
-                response = await client.post(url, json=self._body(operation, payload), headers=headers)
+                log_event("d365.request.prepare", "start", operation=operation, correlation_id=correlation_id)
+                try:
+                    body = self._body(operation, payload)
+                except IntegrationError:
+                    log_event("d365.request.prepare", "failed", level=logging.ERROR, operation=operation,
+                              correlation_id=correlation_id, issue_code="d365_request_mapping_invalid")
+                    raise
+                log_event("d365.request.prepare", "completed", operation=operation, correlation_id=correlation_id,
+                          request_fields_count=len(payload))
+                log_request_shape(operation, body)
+                log_event("d365.http", "start", operation=operation, correlation_id=correlation_id, attempt=1)
+                response = await client.post(url, json=body, headers=headers)
+                log_event("d365.http", "received", operation=operation, correlation_id=correlation_id,
+                          status_code=response.status_code, attempt=1, response_bytes=len(response.content),
+                          elapsed_ms=round((time.monotonic() - started) * 1000, 2))
                 if response.status_code == 401:
+                    log_event("d365.auth.refresh", "start", operation=operation, correlation_id=correlation_id,
+                              status_code=401, attempt=2)
                     headers["Authorization"] = f"Bearer {await self.get_access_token(force_refresh=True)}"
-                    response = await client.post(url, json=self._body(operation, payload), headers=headers)
+                    log_event("d365.auth.refresh", "completed", operation=operation, correlation_id=correlation_id)
+                    log_event("d365.request.prepare", "start", operation=operation, correlation_id=correlation_id,
+                              attempt=2)
+                    body = self._body(operation, payload)
+                    log_event("d365.request.prepare", "completed", operation=operation, correlation_id=correlation_id,
+                              request_fields_count=len(payload), attempt=2)
+                    log_request_shape(operation, body)
+                    log_event("d365.http", "start", operation=operation, correlation_id=correlation_id, attempt=2)
+                    response = await client.post(url, json=body, headers=headers)
+                    log_event("d365.http", "received", operation=operation, correlation_id=correlation_id,
+                              status_code=response.status_code, attempt=2, response_bytes=len(response.content),
+                              elapsed_ms=round((time.monotonic() - started) * 1000, 2))
                 if response.is_error:
-                    logger.warning("d365_operation_failed operation=%s status=%s correlation_id=%s", operation, response.status_code, correlation_id)
+                    log_event("d365.http", "failed", level=logging.ERROR, operation=operation,
+                              status_code=response.status_code, correlation_id=correlation_id,
+                              retryable=response.status_code in {408, 429} or response.status_code >= 500,
+                              elapsed_ms=round((time.monotonic() - started) * 1000, 2),
+                              **d365_error_diagnostics(response))
                     raise IntegrationError(
                         f"D365 {operation} failed (HTTP {response.status_code}). Reference: {correlation_id}",
                         retryable=response.status_code in {408, 429} or response.status_code >= 500,
                     )
+                log_event("d365.http", "completed", operation=operation, correlation_id=correlation_id,
+                          status_code=response.status_code, elapsed_ms=round((time.monotonic() - started) * 1000, 2))
+                log_event("d365.response.decode", "start", operation=operation, correlation_id=correlation_id)
                 data = response.json()
                 if isinstance(data, str):
                     data = json.loads(data)
-                return normalize(data, getattr(self.settings, "d365_response_field_maps", {}).get(operation, {}))
+                log_event("d365.response.decode", "completed", operation=operation, correlation_id=correlation_id)
+                log_event("d365.response.normalize", "start", operation=operation, correlation_id=correlation_id)
+                try:
+                    result = normalize(data, getattr(self.settings, "d365_response_field_maps", {}).get(operation, {}))
+                except IntegrationError:
+                    log_event("d365.response.normalize", "failed", level=logging.ERROR, operation=operation,
+                              correlation_id=correlation_id, issue_code="d365_response_mapping_invalid")
+                    raise
+                log_event("d365.response.normalize", "completed", operation=operation, correlation_id=correlation_id)
+                return result
             except (httpx.TimeoutException, httpx.RequestError) as exc:
+                log_event("d365.http", "failed", level=logging.ERROR, operation=operation,
+                          correlation_id=correlation_id, issue_code="d365_connection_failed",
+                          elapsed_ms=round((time.monotonic() - started) * 1000, 2))
                 raise IntegrationError(f"D365 {operation} connection failed. Reference: {correlation_id}") from exc
             except (json.JSONDecodeError, TypeError) as exc:
+                log_event("d365.response.decode", "failed", level=logging.ERROR, operation=operation,
+                          correlation_id=correlation_id, issue_code="d365_response_json_invalid")
                 raise IntegrationError("D365 returned an invalid JSON response", retryable=False) from exc
 
         if self.client is not None:
@@ -220,9 +296,13 @@ class D365Service:
     def _records(data: Any, key: str) -> list[dict]:
         records = data.get(key) if isinstance(data, dict) else data
         if not isinstance(records, list) or any(not isinstance(row, dict) for row in records):
+            log_event("d365.response.records", "failed", level=logging.ERROR,
+                      issue_code="d365_response_array_invalid")
             raise IntegrationError(f"D365 response must contain a {key} array", retryable=False)
+        log_event("d365.response.records", "validated", record_count=len(records))
         return records
 
+    @traced("d365.requirements")
     async def get_open_requirements(self) -> list[Job]:
         data = await self.call_d365_service("get_open_requirements", {})
         jobs = []
@@ -236,6 +316,8 @@ class D365Service:
                     if parsed.replace(tzinfo=parsed.tzinfo or timezone.utc) < datetime.now(timezone.utc):
                         continue
                 except ValueError as exc:
+                    log_event("d365.requirements.validate", "failed", level=logging.ERROR,
+                              issue_code="d365_job_deadline_invalid")
                     raise IntegrationError("D365 returned an invalid job deadline", retryable=False) from exc
             for key in ("required_skills", "preferred_skills", "required_certifications"):
                 if isinstance(row.get(key), str):
@@ -243,21 +325,33 @@ class D365Service:
             try:
                 jobs.append(Job.model_validate(row))
             except ValidationError as exc:
+                log_event("d365.requirements.validate", "failed", level=logging.ERROR,
+                          issue_code="d365_job_fields_invalid",
+                          hint="Check the F&O requirement contract mapping and mandatory job response fields.")
                 raise IntegrationError("D365 job response is missing required fields", retryable=False) from exc
+        log_event("d365.requirements", "validated", record_count=len(jobs))
         return jobs
 
+    @traced("d365.application.acknowledgement")
     async def submit_application(self, payload: dict) -> dict:
         data = await self.call_d365_service("submit_application", {"company": self.settings.d365_company, **payload})
         if not isinstance(data, dict) or data.get("success") is not True:
+            log_event("d365.application.acknowledgement", "failed", level=logging.ERROR,
+                      issue_code="d365_application_not_acknowledged")
             raise IntegrationError("D365 did not confirm application creation", retryable=False)
         application_id = data.get("application_id")
         if not isinstance(application_id, (str, int)) or not str(application_id).strip():
+            log_event("d365.application.acknowledgement", "failed", level=logging.ERROR,
+                      issue_code="d365_application_id_missing")
             raise IntegrationError("D365 submitApplication must return a stable ApplicationId; evaluation cannot be linked without it", retryable=False)
         return {**data, "application_id": str(application_id)}
 
+    @traced("d365.evaluation.acknowledgement")
     async def save_candidate_evaluation(self, payload: dict) -> dict:
         application_id = payload.get("application_id")
         if not application_id:
+            log_event("d365.evaluation.validate", "failed", level=logging.ERROR,
+                      issue_code="d365_application_id_missing")
             raise IntegrationError("An ApplicationId is required to save an evaluation", retryable=False)
         nested = payload.get("evaluation")
         if nested is None:
@@ -267,8 +361,12 @@ class D365Service:
         try:
             evaluation = Evaluation.model_validate(nested)
         except ValidationError as exc:
+            log_event("d365.evaluation.validate", "failed", level=logging.ERROR,
+                      issue_code="d365_evaluation_fields_invalid")
             raise IntegrationError("Only validated evaluations can be saved to D365", retryable=False) from exc
         if not evaluation.model_deployment.strip() or not evaluation.prompt_version.strip():
+            log_event("d365.evaluation.validate", "failed", level=logging.ERROR,
+                      issue_code="d365_evaluation_provenance_missing")
             raise IntegrationError("New evaluation writes require the actual model deployment and prompt version", retryable=False)
         data = await self.call_d365_service("save_candidate_evaluation", {
             "company": self.settings.d365_company, "application_id": application_id,
@@ -277,8 +375,12 @@ class D365Service:
             **({"requirement_id": payload["requirement_id"]} if payload.get("requirement_id") else {}),
         })
         if not isinstance(data, dict) or data.get("success") is not True:
+            log_event("d365.evaluation.acknowledgement", "failed", level=logging.ERROR,
+                      issue_code="d365_evaluation_not_acknowledged")
             raise IntegrationError("D365 did not confirm evaluation persistence", retryable=False)
         if str(data.get("application_id", "")) != str(application_id):
+            log_event("d365.evaluation.acknowledgement", "failed", level=logging.ERROR,
+                      issue_code="d365_application_id_mismatch")
             raise IntegrationError("D365 evaluation acknowledgement has the wrong ApplicationId", retryable=False)
         return data
 
@@ -296,6 +398,7 @@ class D365Service:
         except ValidationError as exc:
             raise IntegrationError("D365 candidate response is incomplete or invalid", retryable=False) from exc
 
+    @traced("d365.candidates.ranking")
     async def get_top_candidates(self, requirement_id: str, limit: int = 25) -> list[Candidate]:
         data = await self.call_d365_service("get_top_candidates", {
             "company": self.settings.d365_company, "requirement_id": requirement_id, "limit": limit,
@@ -305,6 +408,7 @@ class D365Service:
             raise IntegrationError("D365 returned candidates for a different requirement", retryable=False)
         return sorted(candidates, key=lambda c: c.evaluation.score if c.evaluation else -1, reverse=True)[:limit]
 
+    @traced("d365.applications.history")
     async def get_my_applications(self, user: User) -> list[Candidate]:
         data = await self.call_d365_service("get_my_applications", {
             "company": self.settings.d365_company, "owner_issuer": user.issuer, "owner_sub": user.sub,
@@ -317,6 +421,7 @@ class D365Service:
             result.append(candidate)
         return result
 
+    @traced("d365.application.detail")
     async def get_application(self, application_id: str) -> Candidate:
         data = await self.call_d365_service("get_application", {
             "company": self.settings.d365_company, "application_id": application_id,

@@ -79,7 +79,9 @@ Publish a reviewed privacy notice, version it with `CONSENT_VERSION`, and captur
 
 ## Observability and health
 
-`GET /api/health` reports application health/mode; it is not a certificate that all external credentials, callbacks, or X++ contracts work. Check API, worker, Redis, storage, D365, and Azure OpenAI separately during rollout. Logs should record operation category, safe status, and correlation ID, not tokens, secrets, raw resumes, provider response bodies, or unnecessary candidate details.
+`GET /api/health` reports application health/mode; it is not a certificate that all external credentials, callbacks, or X++ contracts work. Check API, worker, Redis, storage, D365, and Azure OpenAI separately during rollout.
+
+API and worker terminals report stage start/completion/failure, elapsed time, request IDs, stable application IDs and D365 correlation IDs. `LOG_LEVEL=INFO` is the default; `LOG_LEVEL=DEBUG` adds safe diagnostic events after restarting both services. Known D365 validation errors include a canonical provider message and a suggested check; arbitrary provider response bodies are not printed. OAuth query strings and raw worker job arguments/results are suppressed. Logs omit tokens, secrets, raw resumes and candidate contact details at both levels. See [terminal logging and debugging](debugging.md) for PowerShell capture commands, tracing a failed stage, and interpreting D365 HTTP 500 responses.
 
 Run a live acceptance flow with a synthetic text-based resume: authenticate, read a real open job, submit once, retry the same request, observe worker progression, verify the evaluation in D365, inspect job-specific HR evidence, and download the authorized original. Check cross-role/cross-owner denial and a missing integration path. The repository test suite uses mocks and cannot replace these live deployment checks.
 

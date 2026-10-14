@@ -2,13 +2,17 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.errors import ConfigurationError
+from app.observability import configure_logging, log_event, stage
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False, populate_by_name=True)
     app_name: str = "TalentMatch AI"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     app_env: Literal["development", "test", "production"] = "development"
     demo_mode: bool = True
     frontend_url: str = Field(
@@ -95,4 +99,16 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # Pydantic root-validation errors can include the entire environment input
+    # dictionary. Emit field names only, then raise a value-free startup error.
+    configure_logging()
+    with stage("configuration.load"):
+        try:
+            settings = Settings()
+        except ValidationError as exc:
+            for failure in exc.errors(include_url=False, include_context=False, include_input=False):
+                field = failure["loc"][0] if failure["loc"] else "production_configuration"
+                log_event("configuration.validate", "rejected", field=str(field), reason="invalid_setting")
+            raise ConfigurationError("Application settings are invalid. Check configuration.validate in the terminal.") from None
+        configure_logging(settings.log_level)
+        return settings

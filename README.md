@@ -121,7 +121,7 @@ The repository also provides a [connected production Compose override](compose.p
 
 ## Environment and external integrations
 
-The complete variable reference is in [environment configuration](docs/environment.md); copy the committed examples and supply secrets through your environment settings or a secret manager. Do not commit real `.env` files or put credentials in `VITE_` variables.
+The complete variable reference is in [environment configuration](docs/environment.md); copy the committed examples and supply secrets through your environment settings or a secret manager. Do not commit real `.env` files or put credentials in `VITE_` variables. For stage-by-stage API/worker terminal logs, safe D365 diagnostics and PowerShell log capture, see [debugging](docs/debugging.md).
 
 | Integration | What is implemented | What you must configure/verify |
 | --- | --- | --- |

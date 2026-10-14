@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from app.errors import IntegrationError
 from app.metadata import SQLiteMetadata
 from app.models import Candidate, Evaluation, User
+from app.observability import log_event, traced
 from app.services.d365 import D365Service, MEMO_FIELDS, _pascal_evidence
 
 LEAN_REQUEST_FIELDS = {
@@ -37,6 +38,7 @@ class SQLiteD365Service(D365Service):
         super().__init__(settings, **kwargs)
         self.metadata = metadata or SQLiteMetadata(settings.sqlite_database_path)
 
+    @traced("d365.request.mapping")
     def _body(self, operation: str, payload: dict[str, Any]) -> dict:
         import json
         if operation == "get_open_requirements":
@@ -72,12 +74,15 @@ class SQLiteD365Service(D365Service):
                     row["published_date"] = row["open_date"]
         return result
 
+    @traced("d365.application.acknowledgement")
     async def submit_application(self, payload: dict) -> dict:
         application_id = payload.get("application_id")
         record = await self.metadata.get_application(str(application_id or ""), self.settings.d365_company)
         if not record or record["payload"] != payload:
+            log_event("d365.application.acknowledgement", "rejected", issue_code="frozen_submission_missing")
             raise IntegrationError("A frozen SQLite submission is required before calling D365", retryable=False)
         if record.get("candidate_id") and record["stage"] in {"accepted", "queued"}:
+            log_event("d365.application.acknowledgement", "reused", application_id=application_id, cached=True)
             return {"success": True, "application_id": application_id, "candidate_id": record["candidate_id"]}
         name = str(payload["candidate_name"]).strip().split(maxsplit=1)
         lean = {key: payload[key] for key in ("application_id", "requirement_id", "owner_issuer", "owner_sub",
@@ -85,27 +90,36 @@ class SQLiteD365Service(D365Service):
         lean.update(company=self.settings.d365_company, first_name=name[0], last_name=name[1] if len(name) > 1 else "")
         data = await self.call_d365_service("submit_application", lean)
         if not isinstance(data, dict) or data.get("success") is not True:
+            log_event("d365.application.acknowledgement", "rejected", issue_code="application_not_confirmed")
             raise IntegrationError("D365 did not confirm application creation", retryable=False)
         if data.get("application_id") != application_id:
+            log_event("d365.application.acknowledgement", "rejected", issue_code="application_id_mismatch")
             raise IntegrationError("D365 acknowledgement has the wrong ApplicationId", retryable=False)
         candidate_id = data.get("candidate_id")
         if not isinstance(candidate_id, str) or not candidate_id.strip():
+            log_event("d365.application.acknowledgement", "rejected", issue_code="candidate_id_missing")
             raise IntegrationError("D365 must return its stable CandidateId", retryable=False)
+        log_event("d365.application.acknowledgement", "validated", application_id=application_id, confirmed=True)
         return data
 
+    @traced("d365.evaluation.acknowledgement")
     async def save_candidate_evaluation(self, payload: dict) -> dict:
         application_id = str(payload.get("application_id", ""))
         record = await self.metadata.get_application(application_id, self.settings.d365_company)
         if not record or record["stage"] not in {"accepted", "queued"} or not record.get("candidate_id"):
+            log_event("d365.evaluation.acknowledgement", "rejected", issue_code="application_not_acknowledged")
             raise IntegrationError("An acknowledged SQLite application is required for evaluation", retryable=False)
         requirement_id = record["requirement_id"]
         if payload.get("requirement_id", requirement_id) != requirement_id:
+            log_event("d365.evaluation.acknowledgement", "rejected", issue_code="requirement_id_mismatch")
             raise IntegrationError("Evaluation refers to a different job requirement", retryable=False)
         try:
             evaluation = Evaluation.model_validate(payload.get("evaluation"))
         except ValidationError as exc:
+            log_event("d365.evaluation.acknowledgement", "rejected", issue_code="evaluation_schema_invalid")
             raise IntegrationError("Only validated evaluations can be saved to D365", retryable=False) from exc
         if not evaluation.model_deployment.strip() or not evaluation.prompt_version.strip():
+            log_event("d365.evaluation.acknowledgement", "rejected", issue_code="evaluation_provenance_missing")
             raise IntegrationError("New evaluation writes require the actual model deployment and prompt version",
                                    retryable=False)
         evaluation_id = "EVA-" + (
@@ -124,14 +138,19 @@ class SQLiteD365Service(D365Service):
                     requirement_id=requirement_id, evaluation_id=evaluation_id)
         data = await self.call_d365_service("save_candidate_evaluation", lean)
         if not isinstance(data, dict) or data.get("success") is not True:
+            log_event("d365.evaluation.acknowledgement", "rejected", issue_code="evaluation_not_confirmed")
             raise IntegrationError("D365 did not confirm evaluation persistence", retryable=False)
         if data.get("application_id") != application_id or data.get("evaluation_id") != evaluation_id:
+            log_event("d365.evaluation.acknowledgement", "rejected", issue_code="evaluation_ids_mismatch")
             raise IntegrationError("D365 evaluation acknowledgement has the wrong identifiers", retryable=False)
         state.update(status="Completed", evaluation_confirmed=True)
         state.pop("error_code", None)
         await self.metadata.save_evaluation_state(application_id, state)
+        log_event("d365.evaluation.acknowledgement", "validated", application_id=application_id,
+                  evaluation_id=evaluation_id, confirmed=True)
         return data
 
+    @traced("sqlite.application.validate")
     async def _from_record(self, record: dict) -> Candidate:
         if record["stage"] not in {"accepted", "queued"} or not record.get("candidate_id"):
             raise IntegrationError("Application has not been acknowledged by D365", status_code=404, retryable=False)
@@ -152,16 +171,19 @@ class SQLiteD365Service(D365Service):
         except (KeyError, ValidationError) as exc:
             raise IntegrationError("SQLite application metadata is incomplete", retryable=False) from exc
 
+    @traced("sqlite.application.detail")
     async def get_application(self, application_id: str) -> Candidate:
         record = await self.metadata.get_application(application_id, self.settings.d365_company)
         if record is None:
             raise IntegrationError("Application not found in SQLite metadata", status_code=404, retryable=False)
         return await self._from_record(record)
 
+    @traced("sqlite.applications.history")
     async def get_my_applications(self, user: User) -> list[Candidate]:
         rows = await self.metadata.submissions(company=self.settings.d365_company, owner=(user.issuer, user.sub))
         return [await self._from_record(record) for _, record in rows if record["stage"] in {"accepted", "queued"}]
 
+    @traced("sqlite.candidates.ranking")
     async def get_top_candidates(self, requirement_id: str, limit: int = 25) -> list[Candidate]:
         rows = await self.metadata.submissions(company=self.settings.d365_company, requirement_id=requirement_id)
         records = [await self._from_record(record) for _, record in rows if record["stage"] in {"accepted", "queued"}]
