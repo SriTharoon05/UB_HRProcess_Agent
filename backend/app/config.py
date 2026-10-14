@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+import re
 from typing import Literal
 
 from pydantic import AliasChoices, Field, ValidationError, model_validator
@@ -68,7 +69,10 @@ class Settings(BaseSettings):
     d365_submit_application_path: str = (
         "/api/services/UBHRPortalServiceGroup/UBHRPortalService/submitApplication"
     )
-    d365_save_evaluation_path: str = "/api/services/UBHRPortalServiceGroup/UBHRPortalService/saveCandidateEvaluation"
+    d365_save_evaluation_path: str = Field(
+        default="/api/services/UBHRPortalServiceGroup/UBHRPortalService/saveCandidateEvaluation",
+        validation_alias=AliasChoices("D365_SAVE_EVALUATION_PATH", "D365_SAVE_CANDIDATE_EVALUATION_PATH"),
+    )
     d365_top_candidates_path: str = ""
     d365_my_applications_path: str = ""
     d365_application_path: str = ""
@@ -86,6 +90,26 @@ class Settings(BaseSettings):
     azure_storage_connection_string: str = Field(default="", repr=False)
     azure_storage_container: str = "resumes"
     evaluation_max_attempts: int = Field(default=5, ge=1, le=10)
+
+    @model_validator(mode="after")
+    def resolve_sqlite_evaluation_endpoint(self):
+        # Older .env files contain an empty save path. An explicit empty string
+        # overrides the Pydantic default, so restore the three-operation F&O
+        # contract in SQLite mode without changing optional legacy operations.
+        self.d365_save_evaluation_path = self.d365_save_evaluation_path.strip()
+        if self.d365_contract_mode == "sqlite" and not self.d365_save_evaluation_path:
+            service = re.fullmatch(
+                r"(/api/services/[A-Za-z0-9_]+/[A-Za-z0-9_]+)/submitApplication",
+                self.d365_submit_application_path.strip(), flags=re.IGNORECASE,
+            )
+            if service:
+                self.d365_save_evaluation_path = service.group(1) + "/saveCandidateEvaluation"
+            else:
+                self.d365_save_evaluation_path = type(self).model_fields["d365_save_evaluation_path"].default
+            log_event("configuration.d365_evaluation_endpoint", "defaulted",
+                      field="d365_save_evaluation_path", reason="blank_setting",
+                      source="application_service" if service else "sqlite_contract_default")
+        return self
 
     @model_validator(mode="after")
     def secure_production(self):
