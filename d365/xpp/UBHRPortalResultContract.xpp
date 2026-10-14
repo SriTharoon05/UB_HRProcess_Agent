@@ -1,0 +1,47 @@
+/// <summary>
+/// Typed operation acknowledgement. Success serializes as a JSON boolean.
+/// </summary>
+[DataContractAttribute]
+public final class UBHRPortalResultContract
+{
+    boolean success;
+    str applicationId;
+    str candidateId;
+    str evaluationId;
+    str message;
+
+    [DataMemberAttribute("Success")]
+    public boolean parmSuccess(boolean _success = success)
+    {
+        success = _success;
+        return success;
+    }
+
+    [DataMemberAttribute("ApplicationId")]
+    public str parmApplicationId(str _applicationId = applicationId)
+    {
+        applicationId = _applicationId;
+        return applicationId;
+    }
+
+    [DataMemberAttribute("CandidateId")]
+    public str parmCandidateId(str _candidateId = candidateId)
+    {
+        candidateId = _candidateId;
+        return candidateId;
+    }
+
+    [DataMemberAttribute("EvaluationId")]
+    public str parmEvaluationId(str _evaluationId = evaluationId)
+    {
+        evaluationId = _evaluationId;
+        return evaluationId;
+    }
+
+    [DataMemberAttribute("Message")]
+    public str parmMessage(str _message = message)
+    {
+        message = _message;
+        return message;
+    }
+}

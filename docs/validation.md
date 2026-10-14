@@ -14,6 +14,9 @@
 | Selected-job LinkedIn browser flow | Passed with real Authlib state handling and RSA ID-token validation; provider network responses mocked, three 303 callbacks restored selected-job/form/query/fragment |
 | Visual checks | Desktop 1440px and mobile 390px; navigation works and tables scroll within their containers |
 | Saved startup commands | Services stopped and restarted successfully through `scripts/dev.sh` |
+| D365 source bundle | DTO/metadata consistency, 12 JSON fixtures and all six requests/responses through the actual backend adapter passed; Postman collection validated |
+| D365 adapter regression | 13 passed after adding the X++ source bundle |
+| X++ build/database synchronization | Not executed; requires an F&O development environment |
 
 The browser scenario submits a newly generated PDF through the candidate application form, verifies its entered contact name/email, current application identifier and candidate history, checks candidate-to-HR access denial, switches to HR, opens the evaluation, and downloads the exact original PDF. It also checks mobile layout and browser exceptions. Sample evaluations remain labeled fictional fixtures. The contact-field regression was rerun against the development services; container smoke checks were performed during the initial build.
 
@@ -25,6 +28,6 @@ Backend tests validate signed OIDC tokens, state/nonce/issuer/audience/expiry ha
 
 No live D365, LinkedIn, Entra, Azure OpenAI, or Azure Blob credentials were provided during this build. Their adapters are implemented and tested with mocks; live provider behavior and deployment permissions remain unverified.
 
-The existing D365 `getOpenRequirements` and `submitApplication` paths are configured from the supplied requirements. Their actual X++ request/response contracts still need confirmation. `saveCandidateEvaluation` and `getTopCandidates` need X++ deployment; their example paths intentionally remain empty. Candidate-owned history and details need additional read contracts with ownership fields. Persistent processing/failure updates and business-record deletion need separate D365 capabilities.
+The reported existing D365 `getOpenRequirements` and `submitApplication` paths remain in the default backend example configuration; their live contracts have not been captured. The new [D365 source bundle](../d365/README.md) implements source for all six operations under `UBHRPortalServiceGroup/UBHRPortalService`, with four table definitions and full configuration instructions. Static metadata checks and mocked adapter calls passed. X++ compilation, database synchronization, live serializer/security acceptance and deployment still require the F&O environment; default pending paths remain blank until a service is deployed. Persistent processing/failure updates and business-record deletion need separate D365 capabilities.
 
 GitHub Actions is configured to run tests/builds and the demo browser scenario. Local passing checks do not establish the outcome of a future Actions run, a production deployment, or restoration in a new cloud task.

@@ -1,0 +1,172 @@
+/// <summary>
+/// A complete published requirement; text memo members must never be truncated.
+/// </summary>
+[DataContractAttribute]
+public final class UBHRPortalRequirementContract
+{
+    str requirementId;
+    str jobTitle;
+    str jobDescription;
+    str responsibilities;
+    str requiredSkills;
+    str preferredSkills;
+    str requiredQualifications;
+    str requiredCertifications;
+    str department;
+    str jobLocation;
+    str workMode;
+    str employmentType;
+    real minimumExperienceYears;
+    real maximumExperienceYears;
+    int numberOfOpenings;
+    str jobStatus;
+    str publishedDateTime;
+    str closingDateTime;
+    str evaluationCriteriaJson;
+    str rubricVersion;
+
+    public void new()
+    {
+        evaluationCriteriaJson = "{}";
+    }
+
+    [DataMemberAttribute("RequirementId")]
+    public str parmRequirementId(str _requirementId = requirementId)
+    {
+        requirementId = _requirementId;
+        return requirementId;
+    }
+
+    [DataMemberAttribute("JobTitle")]
+    public str parmJobTitle(str _jobTitle = jobTitle)
+    {
+        jobTitle = _jobTitle;
+        return jobTitle;
+    }
+
+    [DataMemberAttribute("JobDescription")]
+    public str parmJobDescription(str _jobDescription = jobDescription)
+    {
+        jobDescription = _jobDescription;
+        return jobDescription;
+    }
+
+    [DataMemberAttribute("Responsibilities")]
+    public str parmResponsibilities(str _responsibilities = responsibilities)
+    {
+        responsibilities = _responsibilities;
+        return responsibilities;
+    }
+
+    [DataMemberAttribute("RequiredSkills")]
+    public str parmRequiredSkills(str _requiredSkills = requiredSkills)
+    {
+        requiredSkills = _requiredSkills;
+        return requiredSkills;
+    }
+
+    [DataMemberAttribute("PreferredSkills")]
+    public str parmPreferredSkills(str _preferredSkills = preferredSkills)
+    {
+        preferredSkills = _preferredSkills;
+        return preferredSkills;
+    }
+
+    [DataMemberAttribute("RequiredQualifications")]
+    public str parmRequiredQualifications(str _requiredQualifications = requiredQualifications)
+    {
+        requiredQualifications = _requiredQualifications;
+        return requiredQualifications;
+    }
+
+    [DataMemberAttribute("RequiredCertifications")]
+    public str parmRequiredCertifications(str _requiredCertifications = requiredCertifications)
+    {
+        requiredCertifications = _requiredCertifications;
+        return requiredCertifications;
+    }
+
+    [DataMemberAttribute("Department")]
+    public str parmDepartment(str _department = department)
+    {
+        department = _department;
+        return department;
+    }
+
+    [DataMemberAttribute("JobLocation")]
+    public str parmJobLocation(str _jobLocation = jobLocation)
+    {
+        jobLocation = _jobLocation;
+        return jobLocation;
+    }
+
+    [DataMemberAttribute("WorkMode")]
+    public str parmWorkMode(str _workMode = workMode)
+    {
+        workMode = _workMode;
+        return workMode;
+    }
+
+    [DataMemberAttribute("EmploymentType")]
+    public str parmEmploymentType(str _employmentType = employmentType)
+    {
+        employmentType = _employmentType;
+        return employmentType;
+    }
+
+    [DataMemberAttribute("MinimumExperienceYears")]
+    public real parmMinimumExperienceYears(real _minimumExperienceYears = minimumExperienceYears)
+    {
+        minimumExperienceYears = _minimumExperienceYears;
+        return minimumExperienceYears;
+    }
+
+    [DataMemberAttribute("MaximumExperienceYears")]
+    public real parmMaximumExperienceYears(real _maximumExperienceYears = maximumExperienceYears)
+    {
+        maximumExperienceYears = _maximumExperienceYears;
+        return maximumExperienceYears;
+    }
+
+    [DataMemberAttribute("NumberOfOpenings")]
+    public int parmNumberOfOpenings(int _numberOfOpenings = numberOfOpenings)
+    {
+        numberOfOpenings = _numberOfOpenings;
+        return numberOfOpenings;
+    }
+
+    [DataMemberAttribute("JobStatus")]
+    public str parmJobStatus(str _jobStatus = jobStatus)
+    {
+        jobStatus = _jobStatus;
+        return jobStatus;
+    }
+
+    [DataMemberAttribute("PublishedDateTime")]
+    public str parmPublishedDateTime(str _publishedDateTime = publishedDateTime)
+    {
+        publishedDateTime = _publishedDateTime;
+        return publishedDateTime;
+    }
+
+    [DataMemberAttribute("ClosingDateTime")]
+    public str parmClosingDateTime(str _closingDateTime = closingDateTime)
+    {
+        closingDateTime = _closingDateTime;
+        return closingDateTime;
+    }
+
+    [DataMemberAttribute("EvaluationCriteriaJson")]
+    public str parmEvaluationCriteriaJson(str _evaluationCriteriaJson = evaluationCriteriaJson)
+    {
+        evaluationCriteriaJson = _evaluationCriteriaJson;
+        return evaluationCriteriaJson;
+    }
+
+    [DataMemberAttribute("RubricVersion")]
+    public str parmRubricVersion(str _rubricVersion = rubricVersion)
+    {
+        rubricVersion = _rubricVersion;
+        return rubricVersion;
+    }
+}

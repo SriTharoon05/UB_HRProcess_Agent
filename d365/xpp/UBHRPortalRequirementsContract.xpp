@@ -1,0 +1,23 @@
+/// <summary>
+/// JSON array wrapper. Empty results serialize as an empty array.
+/// </summary>
+[DataContractAttribute]
+public final class UBHRPortalRequirementsContract
+{
+    List requirements;
+
+    public void new()
+    {
+        requirements = new List(Types::Class);
+    }
+
+    [DataMemberAttribute("Requirements"),
+     DataCollectionAttribute(Types::Class, classStr(UBHRPortalRequirementContract)),
+     AifCollectionTypeAttribute("_requirements", Types::Class, classStr(UBHRPortalRequirementContract)),
+     AifCollectionTypeAttribute("return", Types::Class, classStr(UBHRPortalRequirementContract))]
+    public List parmRequirements(List _requirements = requirements)
+    {
+        requirements = _requirements;
+        return requirements;
+    }
+}

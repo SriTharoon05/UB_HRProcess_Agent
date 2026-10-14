@@ -1,157 +1,64 @@
-# Proposed D365 business schema
+# D365 business schema
 
-D365 Finance & Operations is the business system of record. The portal communicates through JSON custom services; it does not connect to D365 SQL and does not maintain a second SQL business database. Redis holds temporary sessions, submission coordination, job state, and cached processing context. Azure Blob Storage holds private documents.
+The implementation source pack is in [d365/](../d365/README.md). Its [TABLES.md](../d365/TABLES.md) specifies every field, EDT, enum, index, relation and designer property; [table-specification.json](../d365/table-specification.json) is the machine-readable checklist. Those files supersede the earlier logical proposal.
 
-Demo mode keeps private candidate information keyed by issuer/subject and separate per-application contact/profile/document snapshots in memory. A later application updates that demo candidate's current contact details while preserving previous application snapshots and reusing the candidate ID. Demo records reset on backend restart; their displayed evaluations are fictional fixtures and no D365 table writes occur.
+D365 Finance & Operations is the connected portal's business system of record. React calls FastAPI, which calls JSON custom services. Redis holds sessions, submission coordination, processing state and cached context; private Azure Blob Storage holds documents. The portal does not connect directly to F&O SQL or create a separate SQL business database.
 
-These are proposed logical tables and field definitions for the D365 team to review in Visual Studio 2022/X++. The existing requirement table's physical name, extended data types, enum values, and service fields have not been verified. Reuse existing candidate/application tables when suitable. The Python adapter normalizes service contracts; it does not create tables or deploy X++.
+The baseline implements these four tables. An existing authoritative requirement table must be mapped deliberately before rollout; creating `UBHRJobRequirement` does not migrate existing jobs. F&O build, synchronization and live acceptance are still required.
 
-## Relationships
+| Table | Stored information |
+| --- | --- |
+| `UBHRJobRequirement` | Full JD, responsibilities, skills, qualifications, certifications, advertised conditions, eligibility dates and criteria |
+| `UBHRCandidate` | Current confirmed contacts, authenticated issuer/subject, identity digest, optional provider snapshot and consent |
+| `UBHRJobApplication` | Candidate/job relations, immutable ownership and contact/profile snapshot, private document reference/checksums, consent, status and submission retry key |
+| `UBHRMatchEvaluation` | One current application-linked assessment, model score, evidence/gaps JSON, explanation, provenance and completion time |
+
+## Relationships and identity
 
 ```mermaid
 erDiagram
-    ExistingJobRequirement ||--o{ UBHRJobApplication : receives
+    UBHRJobRequirement ||--o{ UBHRJobApplication : receives
     UBHRCandidate ||--o{ UBHRJobApplication : submits
     UBHRJobApplication ||--o| UBHRMatchEvaluation : has_current_evaluation
-    ExistingJobRequirement ||--o{ UBHRMatchEvaluation : provides_context
+    UBHRJobRequirement ||--o{ UBHRMatchEvaluation : provides_context
 ```
 
-`RecId` is the D365 technical identifier. `RequirementId`, `CandidateId`, `ApplicationId`, and `EvaluationId` are stable external identifiers. An application links one candidate, one requirement, the uploaded document reference, and at most one current evaluation. One candidate may apply for several requirements.
+`RecId` is the technical F&O identifier; all external requirement/candidate/application/evaluation IDs share the 40-character `UBHRExternalId` EDT. Candidate/application/evaluation IDs use a four-character prefix plus a 36-character GUID. Tables use `SaveDataPerCompany=Yes`; indexes receive company scope through F&O metadata conventions.
 
-## Existing job requirement table
+Candidate identity is the validated `(LinkedInIssuer, LinkedInSub)` pair, never name or email. A unique 64-character SHA-256 `IdentityKey` indexes its length-prefixed UTF-8 representation, avoiding a wide string composite index. The service compares the original issuer/subject with ordinal case sensitivity after lookup.
 
-Suggested logical name: `UBHRJobRequirement`. **Do not assume this is the actual physical table name.**
+The mapped integration user's current/default company must match `D365_COMPANY`. Parameterless job reads use that company context; the five request-bearing operations require `Company` to match it. This implementation does not route arbitrary browser-selected legal entities.
 
-| Field | Proposed D365 type | Meaning |
-| --- | --- | --- |
-| RecId | Int64 | System record identifier |
-| RequirementId | String(40) | Stable job identifier |
-| JobTitle | String(200) | Advertised title |
-| JobDescription | Memo | Complete description used for evaluation |
-| Responsibilities | Memo | Job responsibilities |
-| RequiredSkills | Memo | Required job skills |
-| PreferredSkills | Memo | Preferred job skills |
-| MinimumExperienceYears | Real | Minimum relevant experience, when provided |
-| MaximumExperienceYears | Real | Advertised upper range, when provided |
-| RequiredQualifications | Memo | Job-related qualifications |
-| RequiredCertifications | Memo | Job-related certifications |
-| Department | String(100) | Department |
-| JobLocation | String(150) | Advertised location |
-| WorkMode | Enum | Remote / Hybrid / Onsite |
-| EmploymentType | Enum | FullTime / PartTime / Contract / Internship |
-| NumberOfOpenings | Integer | Available positions |
-| JobStatus | Enum | Draft / Open / Closed |
-| PublishedDateTime | UtcDateTime | Publication time |
-| ClosingDateTime | UtcDateTime | Application deadline |
-| HiringManagerWorkerRecId | Int64 | Optional hiring manager worker reference |
-| RubricVersion | String(20) | Optional criteria version |
-| EvaluationCriteriaJson | Memo | Optional structured criteria; no numerical weights required |
-| DataAreaId | String | Legal entity/company |
-| CreatedDateTime | UtcDateTime | Creation time |
-| ModifiedDateTime | UtcDateTime | Latest modification time |
+## Persistence order
 
-Return open, currently eligible requirements. Recheck eligibility at application submission and inside the D365 transaction to prevent a closure race. Return the complete JD and relevant responsibilities, skills, qualifications, certifications, and optional criteria. Omitted optional fields remain unavailable; they must not be populated with invented job facts.
+1. LinkedIn sign-in returns the candidate to the selected job/form and prefills only available public profile fields. It does not create an application or run AI comparison.
+2. The candidate confirms their full name/contact email, optional phone/profile URL, resume and consent.
+3. `submitApplication` validates the open job inside a transaction, upserts the candidate, then inserts the linked application snapshot. Both commit before a stable `ApplicationId` is acknowledged.
+4. The backend queues the acknowledged application. The separate worker reads the actual uploaded document and complete selected JD, calls Azure OpenAI, and validates the structured result.
+5. `saveCandidateEvaluation` saves the result separately and updates application `AIStatus=Completed` in the same transaction.
 
-## Candidate master: `UBHRCandidate`
+A subsequent application may update current candidate contacts while earlier application snapshots remain unchanged. A pending application's service response has `Evaluation=null`; it never invents a zero score or evidence. A real completed score of zero is preserved.
 
-| Field | Proposed D365 type | Meaning |
-| --- | --- | --- |
-| RecId | Int64 | System record identifier |
-| CandidateId | String(40) | Stable candidate identifier |
-| LinkedInIssuer | String(100) | Validated OIDC issuer |
-| LinkedInSub | String(255) | Validated OIDC subject |
-| FullName | String(200) | Candidate name |
-| Email | String(320) | Candidate contact email |
-| Phone | String(30) | Optional contact number |
-| LinkedInUrl | String(500) | Optional candidate-supplied URL |
-| LinkedInProfileJson | Memo | Optional allowlisted snapshot of the profile returned by LinkedIn, separate from edited contact details |
-| ConsentDateTime | UtcDateTime | Consent capture timestamp |
-| CreatedDateTime | UtcDateTime | Creation time |
-| ModifiedDateTime | UtcDateTime | Latest modification time |
-| DataAreaId | String | Legal entity/company |
+## Retry and evaluation rules
 
-Identity is `(LinkedInIssuer, LinkedInSub)` within the chosen company policy, never name or email. LinkedIn's `openid profile email` scopes do not guarantee complete contact information, a profile URL, employment history, or skills. The application form prefills available profile data and collects the required full name and contact email plus optional contact fields. These editable fields do not replace the authenticated identity. Upsert an existing identity before creating a new candidate.
+The unique application `IdempotencyKey` and its `PayloadHash` persist the original submission request. Identical retries return the same application, including after job closure; reuse with different contact/job/document data fails. Candidate identity and application-key races use bounded transactional retries and unique database indexes. A Redis lock alone is insufficient.
 
-`LinkedInProfileJson` preserves the validated subject/issuer and only permitted profile fields actually supplied by LinkedIn: name, given/family names, valid email and its verification flag, HTTPS picture URL, and locale. Keep the original OIDC field names inside this JSON; do not store access tokens, ID tokens, refresh tokens, raw token responses, or session state. A subject identifier or member URN is an identity, not an email or public profile URL. Missing profile data stays absent and the candidate enters missing contact information in the application form. Adding this optional memo field requires a reviewed X++ table/contract extension; it is not deployed by the portal.
+Evaluation `ApplicationRecId` is unique, providing one current evaluation per application. Its requirement is derived from the linked application; a conflicting request requirement fails. Identical evaluation content is a no-op. Changed validated content replaces the current assessment under the worker's fixed `evaluation:<ApplicationId>` key while retaining the evaluation ID. Historical versions would require a separate table and selection rule.
 
-An `email_verified` value describes the provider email in that snapshot. It does not verify a different contact email entered by the candidate or confer HR access.
+The service preserves the model's validated 0–100 score. Evidence labels and minimum-criteria assessments support human review; they do not change HR status or make a hiring decision.
 
-## Job application: `UBHRJobApplication`
+## Profile, document and text fields
 
-| Field | Proposed D365 type | Meaning |
-| --- | --- | --- |
-| RecId | Int64 | System record identifier |
-| ApplicationId | String(40) | Stable application identifier returned by submit service |
-| CandidateRecId | Int64 | Foreign key to candidate `RecId` |
-| RequirementRecId | Int64 | Foreign key to actual requirement table `RecId` |
-| RequirementId | String(50) | External job identifier |
-| FullName | String(200) | Name confirmed for this application, preserved independently of later candidate-master changes |
-| Email | String(320) | Contact email confirmed for this application |
-| Phone | String(30) | Optional contact number confirmed for this application |
-| LinkedInUrl | String(500) | Optional supplied public profile URL confirmed for this application |
-| ResumeFileName | String(255) | Sanitized display filename |
-| ResumeBlobKey | String(500) | Private storage object reference, not a public URL |
-| ResumeSha256 | String(64) | SHA-256 of uploaded document |
-| ResumeExtractJson | Memo | Optional extracted resume data subject to retention policy |
-| JDHash | String(64) | SHA-256 of the complete JD context used for evaluation |
-| AppliedDateTime | UtcDateTime | Submission time |
-| AIStatus | Enum | Pending / Processing / Completed / Failed |
-| HRStatus | Enum | New / Reviewing / Interview / Closed |
-| ConsentVersion | String(20) | Accepted privacy/processing notice version |
-| ConsentDateTime | UtcDateTime | Consent timestamp captured for this application |
-| CreatedDateTime | UtcDateTime | Creation time |
-| ModifiedDateTime | UtcDateTime | Latest modification time |
-| DataAreaId | String | Legal entity/company |
+`LinkedInProfileJson` contains the validated issuer/subject and available allowlisted name, given/family name, valid email, email verification, HTTPS picture and locale. Nested keys retain standard OIDC spelling. OAuth tokens, raw token responses and session state are excluded. The provider's email-verification flag does not verify a different application contact email.
 
-Foreign keys: `CandidateRecId → UBHRCandidate.RecId`; `RequirementRecId → ExistingJobRequirementTable.RecId`. Validate that referenced records belong to the authorized company. Resolve the proposed 40/50-character requirement identifier discrepancy to one shared EDT before deployment.
+Missing provider contacts remain absent so the candidate can enter them. A subject/member URN is an identity, not an email or public profile URL. An absent profile snapshot is stored blank and serialized as `{}` by the DTO.
 
-`submitApplication` must commit the candidate identity upsert, candidate contact/profile updates, and the new job application (including the confirmed contact snapshot, document reference, and consent) in one transaction before returning `Success=true` and its stable `ApplicationId`. The backend queues resume-to-JD evaluation only after this acknowledgement. Evaluation belongs in `UBHRMatchEvaluation`, linked by that application; a login or profile prefill alone must not create an application or run AI comparison.
+Long JD, explanation and JSON fields use String fields with the standard unbounded `Notes` EDT. Evidence arrays remain JSON text (`[]` for an empty array). No document Base64 is persisted. `ResumeBlobKey` preserves the backend-generated private reference unchanged, including its `azure:` prefix; the original resume lives in private Blob Storage.
 
-The portal sends a stable idempotency key for retries. The D365 service must persist an equivalent unique request reference atomically, for example an additional `SubmissionIdempotencyKey` EDT/field or the existing integration request table. A Redis lock alone cannot guarantee uniqueness after Redis loss or an ambiguous HTTP timeout. Define separately whether a candidate may submit a revised resume for the same job; the portal's transport idempotency does not decide that business policy.
+In this baseline numeric advertised values are explicit: zero means zero, not unavailable. Populate accurate experience and opening values before publishing a requirement; adapting a legacy nullable schema requires an explicit contract mapping.
 
-Never place Base64 documents in ordinary text fields. Store only the private key, checksum, filename, and necessary metadata. Document extraction and cached evaluation context contain personal data and need the same retention controls as documents.
+## Status and additional capabilities
 
-## Current evaluation: `UBHRMatchEvaluation`
+`AIStatus` tracks processing and `HRStatus` tracks human review. The six implemented operations cover jobs, submissions, current evaluation persistence, ranking, owned history and detail. Separate Processing/Failed writes, HR status editing, job-maintenance UI, deletion/retention services, historical evaluations and server-side pagination are additional capabilities requiring their own reviewed contracts.
 
-| Field | Proposed D365 type | Meaning |
-| --- | --- | --- |
-| RecId | Int64 | System record identifier |
-| EvaluationId | String(40) | Stable evaluation identifier |
-| ApplicationRecId | Int64 | Foreign key to application `RecId` |
-| RequirementRecId | Int64 | Foreign key to requirement `RecId` |
-| Score | Integer | Model-generated evidence alignment, 0–100 |
-| MeetsMinimumCriteria | NoYes enum | Model assessment of supporting evidence for minimum criteria |
-| MatchLabel | String(30) | StrongEvidence / PartialEvidence / InsufficientEvidence |
-| ScoreJustification | Memo | Detailed explanation of model score |
-| Summary | Memo | Overall evidence summary |
-| MatchedSkillsJson | Memo | Serialized evidenced-requirement objects |
-| PartiallyMatchedJson | Memo | Serialized partially evidenced-requirement objects |
-| MissingSkillsJson | Memo | Serialized not-evidenced requirement objects |
-| EvidenceJson | Memo | Serialized supporting resume evidence |
-| EvaluationConfidence | String(20) | High / Medium / Low |
-| ModelDeployment | String(100) | Azure OpenAI deployment name |
-| PromptVersion | String(30) | Version-controlled prompt identifier |
-| RubricVersion | String(30) | Criteria version, if supplied |
-| EvaluatedDateTime | UtcDateTime | Evaluation completion time |
-| CreatedDateTime | UtcDateTime | Record creation time |
-| ModifiedDateTime | UtcDateTime | Latest modification time |
-| DataAreaId | String | Legal entity/company |
-
-Foreign keys: `ApplicationRecId → UBHRJobApplication.RecId`; `RequirementRecId → ExistingJobRequirementTable.RecId`. The application determines the requirement; reject a conflicting requirement rather than accepting arbitrary cross-job writes. Upsert one current evaluation per application inside a transaction. Return a clear failure if the application is missing.
-
-The adapter preserves the model's validated score. Labels and minimum-criteria assessments are evidence descriptions, not automatic hiring or rejection decisions. Empty JSON collections are `"[]"`; malformed JSON must raise a contract error. Historical evaluations, if later introduced, need a version/history table and an explicit current-record selection rule.
-
-## Keys and indexes for D365 review
-
-| Table | Required logical uniqueness / recommended lookup indexes |
-| --- | --- |
-| Requirement | Unique `(DataAreaId, RequirementId)`; lookup `(DataAreaId, JobStatus, ClosingDateTime)` |
-| Candidate | Unique `(DataAreaId, CandidateId)` and `(DataAreaId, LinkedInIssuer, LinkedInSub)` |
-| Application | Unique `(DataAreaId, ApplicationId)`; unique persisted submission request key; lookups `(DataAreaId, CandidateRecId, AppliedDateTime)` and `(DataAreaId, RequirementRecId, AppliedDateTime)` |
-| Evaluation | Unique `(DataAreaId, EvaluationId)` and `(DataAreaId, ApplicationRecId)`; lookup `(DataAreaId, RequirementRecId, Score)` |
-
-Use D365 metadata/EDT/index conventions and assess string index limits; a normalized identity digest can support uniqueness when the issuer/subject composite cannot be indexed directly. System-generated `RecId` remains the technical key. All service reads and writes must apply `Company`/`DataAreaId`, enforce service permissions, and scope joins to the same legal entity. This deployment uses one configured `D365_COMPANY`; a future multi-company UI requires additional authorization and explicit routing.
-
-## Status ownership
-
-`AIStatus` tracks processing; `HRStatus` tracks human review. The current four proposed services do not establish an independent HR status-write operation. The UI therefore displays existing HR status without pretending to save changes. `saveCandidateEvaluation` should set `AIStatus=Completed` in the same transaction as a successful evaluation upsert. Persisting Processing/Failed status or deletion in D365 requires a confirmed write contract; temporary worker status must not be represented as a verified D365 update.
+Demo mode keeps candidate masters and application snapshots in memory, resets on restart, and displays labeled fictional evaluation fixtures. It does not write these D365 tables. Source/contract checks are documented in [validation.md](validation.md); no live F&O deployment is claimed.

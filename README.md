@@ -122,11 +122,11 @@ The complete variable reference is in [environment configuration](docs/environme
 
 | Integration | What is implemented | What you must configure/verify |
 | --- | --- | --- |
-| D365 requirements | Backend token client, configurable request mapping and typed normalization | Existing `getOpenRequirements` actual X++ signature/response and application permissions |
-| D365 submission | Candidate identity, private document metadata, stable-ID validation | Existing `submitApplication` fields, returned `ApplicationId`, server-side idempotency |
-| D365 evaluations | Structured evaluation mapping and save adapter | Deploy `saveCandidateEvaluation`, then set the currently empty path |
-| D365 rankings | Job-specific candidate/evidence normalization | Deploy `getTopCandidates`, then set the currently empty path |
-| Candidate history/detail | Optional configurable D365 read adapters with ownership checks | Additional confirmed read operations; the four main operations alone do not provide this capability |
+| D365 requirements | Token client, typed normalization and X++ source for full open-job reads | F&O build/deployment, chosen requirement source and mapped-user permissions |
+| D365 submission | Candidate identity, private document metadata and atomic/idempotent X++ submission source | Database synchronization and live stable-ID/retry acceptance |
+| D365 evaluations | Structured mapping, save adapter and current-evaluation X++ upsert source | Deploy `saveCandidateEvaluation` and configure its verified path |
+| D365 rankings | Job-specific normalization and X++ ranked-read source | Deploy `getTopCandidates` and configure its verified path |
+| Candidate history/detail | Ownership checks and both X++ read operation sources | Deploy/configure `getMyApplications` and `getApplication`, then test ownership |
 | LinkedIn | Backend OIDC authorization-code flow and session creation | Client credentials, enabled OIDC product, exact registered redirect URI |
 | HR authentication | Separate Entra OIDC flow and HR role authorization | Tenant/app registration, redirect URI, assigned application role |
 | Azure OpenAI | Complete-document evidence prompt, structured output validation, evidence checks | Endpoint/key/deployment/API-version compatibility and live model smoke test |
@@ -137,7 +137,9 @@ No live external integration is claimed verified without its configured credenti
 
 ## D365 deployment handoff
 
-The supplied existing operations are `getOpenRequirements` and `submitApplication` under `UBHRApplicationServiceGroup/UBHRApplicationService`. Their contracts remain assumptions until actual responses are checked. This repository does not create or deploy D365 tables or X++ methods.
+The complete [Visual Studio setup guide](d365/README.md) now supplies four table specifications, 22 EDTs, three enums, eight X++ data contracts, `UBHRPortalService`, the service/group designer steps, security setup, a Postman collection and all six backend endpoint settings. Follow [TABLES.md](d365/TABLES.md) for exact columns, indexes and relations, then paste the classes from [d365/xpp](d365/xpp).
+
+The new implementation uses `UBHRPortalServiceGroup/UBHRPortalService` and preserves the reported existing `UBHRApplicationServiceGroup/UBHRApplicationService`. Choose the authoritative requirement table before deployment. The source pack is not a compiled/importable F&O package: build, database synchronization and live service/security verification must occur in your F&O development environment.
 
 The new endpoint example values deliberately remain empty:
 
@@ -146,7 +148,7 @@ D365_SAVE_EVALUATION_PATH=
 D365_TOP_CANDIDATES_PATH=
 ```
 
-Use [proposed table definitions](docs/d365-schema.md) and [endpoint examples](docs/d365-endpoints.md) to implement and validate them. Completed evaluations need an idempotent upsert keyed by the application. Independent D365 Processing/Failed updates, HR status changes, and deletion require additional confirmed write contracts; the portal does not pretend those writes exist. The rankings contract supports a top-N limit, not a verified total population count or server-side pagination.
+After deploying the source pack, merge [d365/backend.env.example](d365/backend.env.example) into ignored `backend/.env`; D365 credentials/endpoints belong there, while React continues to call FastAPI. The [schema overview](docs/d365-schema.md) and [wire contracts](docs/d365-endpoints.md) explain persistence and mappings. Independent D365 Processing/Failed updates, HR status changes and deletion require additional contracts. Rankings provide a top-N limit, not a total population count or server-side pagination.
 
 ## Test and build
 
@@ -159,6 +161,7 @@ Or run the checks separately:
 ```bash
 (cd backend && uv run --frozen --extra dev python -m pytest)
 (cd backend && uv run --frozen --extra dev ruff check app tests ../scripts/smoke.py)
+(cd backend && uv run --frozen python ../d365/validate_bundle.py)
 (cd frontend && npm run lint)
 (cd frontend && npm run typecheck)
 (cd frontend && npm run test)

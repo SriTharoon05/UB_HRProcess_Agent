@@ -1,0 +1,157 @@
+/// <summary>
+/// Per-application contact snapshot and authenticated ownership.
+/// Keep evaluation null until a UBHRMatchEvaluation record actually exists.
+/// </summary>
+[DataContractAttribute]
+public final class UBHRPortalApplicationContract
+{
+    str applicationId;
+    str candidateId;
+    str requirementId;
+    str jobTitle;
+    str fullName;
+    str email;
+    str phone;
+    str linkedInUrl;
+    str linkedInProfileJson;
+    str appliedDateTime;
+    str hRStatus;
+    str aIStatus;
+    str resumeFileName;
+    str resumeBlobKey;
+    str linkedInIssuer;
+    str linkedInSub;
+    str evaluatedDateTime;
+    UBHRPortalEvaluationContract evaluation;
+
+    public void new()
+    {
+        linkedInProfileJson = "{}";
+    }
+
+    [DataMemberAttribute("ApplicationId")]
+    public str parmApplicationId(str _applicationId = applicationId)
+    {
+        applicationId = _applicationId;
+        return applicationId;
+    }
+
+    [DataMemberAttribute("CandidateId")]
+    public str parmCandidateId(str _candidateId = candidateId)
+    {
+        candidateId = _candidateId;
+        return candidateId;
+    }
+
+    [DataMemberAttribute("RequirementId")]
+    public str parmRequirementId(str _requirementId = requirementId)
+    {
+        requirementId = _requirementId;
+        return requirementId;
+    }
+
+    [DataMemberAttribute("JobTitle")]
+    public str parmJobTitle(str _jobTitle = jobTitle)
+    {
+        jobTitle = _jobTitle;
+        return jobTitle;
+    }
+
+    [DataMemberAttribute("FullName")]
+    public str parmFullName(str _fullName = fullName)
+    {
+        fullName = _fullName;
+        return fullName;
+    }
+
+    [DataMemberAttribute("Email")]
+    public str parmEmail(str _email = email)
+    {
+        email = _email;
+        return email;
+    }
+
+    [DataMemberAttribute("Phone")]
+    public str parmPhone(str _phone = phone)
+    {
+        phone = _phone;
+        return phone;
+    }
+
+    [DataMemberAttribute("LinkedInUrl")]
+    public str parmLinkedInUrl(str _linkedInUrl = linkedInUrl)
+    {
+        linkedInUrl = _linkedInUrl;
+        return linkedInUrl;
+    }
+
+    [DataMemberAttribute("LinkedInProfileJson")]
+    public str parmLinkedInProfileJson(str _linkedInProfileJson = linkedInProfileJson)
+    {
+        linkedInProfileJson = _linkedInProfileJson;
+        return linkedInProfileJson;
+    }
+
+    [DataMemberAttribute("AppliedDateTime")]
+    public str parmAppliedDateTime(str _appliedDateTime = appliedDateTime)
+    {
+        appliedDateTime = _appliedDateTime;
+        return appliedDateTime;
+    }
+
+    [DataMemberAttribute("HRStatus")]
+    public str parmHRStatus(str _hRStatus = hRStatus)
+    {
+        hRStatus = _hRStatus;
+        return hRStatus;
+    }
+
+    [DataMemberAttribute("AIStatus")]
+    public str parmAIStatus(str _aIStatus = aIStatus)
+    {
+        aIStatus = _aIStatus;
+        return aIStatus;
+    }
+
+    [DataMemberAttribute("ResumeFileName")]
+    public str parmResumeFileName(str _resumeFileName = resumeFileName)
+    {
+        resumeFileName = _resumeFileName;
+        return resumeFileName;
+    }
+
+    [DataMemberAttribute("ResumeBlobKey")]
+    public str parmResumeBlobKey(str _resumeBlobKey = resumeBlobKey)
+    {
+        resumeBlobKey = _resumeBlobKey;
+        return resumeBlobKey;
+    }
+
+    [DataMemberAttribute("LinkedInIssuer")]
+    public str parmLinkedInIssuer(str _linkedInIssuer = linkedInIssuer)
+    {
+        linkedInIssuer = _linkedInIssuer;
+        return linkedInIssuer;
+    }
+
+    [DataMemberAttribute("LinkedInSub")]
+    public str parmLinkedInSub(str _linkedInSub = linkedInSub)
+    {
+        linkedInSub = _linkedInSub;
+        return linkedInSub;
+    }
+
+    [DataMemberAttribute("EvaluatedDateTime")]
+    public str parmEvaluatedDateTime(str _evaluatedDateTime = evaluatedDateTime)
+    {
+        evaluatedDateTime = _evaluatedDateTime;
+        return evaluatedDateTime;
+    }
+
+    [DataMemberAttribute("Evaluation")]
+    public UBHRPortalEvaluationContract parmEvaluation(UBHRPortalEvaluationContract _evaluation = evaluation)
+    {
+        evaluation = _evaluation;
+        return evaluation;
+    }
+}

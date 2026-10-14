@@ -2,27 +2,31 @@
 
 All operations are backend-only HTTP **POST** requests to `D365_BASE_URL` with an Entra client-credentials bearer token. MSAL acquires the resource scope `<D365_BASE_URL>/.default`; the integration client caches/reuses tokens. Never send this token to React.
 
-The service group supplied in the requirements is `UBHRApplicationServiceGroup`, with service `UBHRApplicationService`. The two existing operations' precise contracts have not been supplied or tested against the live environment. The examples below are **proposed integration contracts**, not recorded D365 responses. No X++ service/table deployment is performed by this repository.
+The supplied existing group is `UBHRApplicationServiceGroup`, with service `UBHRApplicationService`; its live contracts have not been captured. The new [X++ source bundle](../d365/README.md) implements all six adapter operations under **`UBHRPortalServiceGroup/UBHRPortalService`**, preserving those existing objects. Its [manifest](../d365/contracts-manifest.json) and [complete examples](../d365/examples/README.md) specify the exact source-pack DTOs. Examples are fictional contract fixtures, not recorded live responses. F&O compilation, synchronization and deployment remain required.
 
 ## Operation status
 
 | Operation | Configuration | External status |
 | --- | --- | --- |
-| `getOpenRequirements` | `D365_REQUIREMENT_PATH` | Reported existing; request/response contract must be confirmed |
-| `submitApplication` | `D365_SUBMIT_APPLICATION_PATH` | Reported existing; stable ID and idempotency contract must be confirmed |
-| `saveCandidateEvaluation` | `D365_SAVE_EVALUATION_PATH` | Pending X++ implementation/deployment; example value intentionally empty |
-| `getTopCandidates` | `D365_TOP_CANDIDATES_PATH` | Pending X++ implementation/deployment; example value intentionally empty |
+| `getOpenRequirements` | `D365_REQUIREMENT_PATH` | Source provided; F&O deployment/live acceptance pending |
+| `submitApplication` | `D365_SUBMIT_APPLICATION_PATH` | Source provided; F&O deployment/live acceptance pending |
+| `saveCandidateEvaluation` | `D365_SAVE_EVALUATION_PATH` | Source provided; F&O deployment/live acceptance pending |
+| `getTopCandidates` | `D365_TOP_CANDIDATES_PATH` | Source provided; F&O deployment/live acceptance pending |
+| `getMyApplications` | `D365_MY_APPLICATIONS_PATH` | Source provided; F&O deployment/live acceptance pending |
+| `getApplication` | `D365_APPLICATION_PATH` | Source provided; F&O deployment/live acceptance pending |
 
-Suggested existing paths:
+Configure these paths after deploying the new source pack:
 
 ```dotenv
-D365_REQUIREMENT_PATH=/api/services/UBHRApplicationServiceGroup/UBHRApplicationService/getOpenRequirements
-D365_SUBMIT_APPLICATION_PATH=/api/services/UBHRApplicationServiceGroup/UBHRApplicationService/submitApplication
-D365_SAVE_EVALUATION_PATH=
-D365_TOP_CANDIDATES_PATH=
+D365_REQUIREMENT_PATH=/api/services/UBHRPortalServiceGroup/UBHRPortalService/getOpenRequirements
+D365_SUBMIT_APPLICATION_PATH=/api/services/UBHRPortalServiceGroup/UBHRPortalService/submitApplication
+D365_SAVE_EVALUATION_PATH=/api/services/UBHRPortalServiceGroup/UBHRPortalService/saveCandidateEvaluation
+D365_TOP_CANDIDATES_PATH=/api/services/UBHRPortalServiceGroup/UBHRPortalService/getTopCandidates
+D365_MY_APPLICATIONS_PATH=/api/services/UBHRPortalServiceGroup/UBHRPortalService/getMyApplications
+D365_APPLICATION_PATH=/api/services/UBHRPortalServiceGroup/UBHRPortalService/getApplication
 ```
 
-After the D365 team deploys the new methods, set their verified relative paths. An empty configured path produces an explicit integration/configuration error. Connected mode never returns a fictional success.
+The default `backend/.env.example` retains the reported existing paths and blank pending paths until you deploy a service. After deployment, merge [d365/backend.env.example](../d365/backend.env.example) into ignored `backend/.env`. An empty configured path produces an explicit integration/configuration error. Connected mode never returns a fictional success.
 
 ## Request wrappers and mappings
 
@@ -44,7 +48,7 @@ The optional profile snapshot maps canonical `linkedin_profile` to the proposed 
 
 Start by obtaining sanitized example requests/responses and exact X++ signatures for each operation. Keep the canonical frontend/API model unchanged while adjusting the adapter's aliases or configuration. Unknown optional fields must not be turned into invented facts; missing required identifiers, invalid JSON collections, and contradictory records are contract errors.
 
-## 1. `getOpenRequirements` — existing
+## 1. `getOpenRequirements`
 
 Default invocation is parameterless with an unwrapped empty body:
 
@@ -85,7 +89,7 @@ Confirm the method's legal-entity behavior in D365: a parameterless response mus
 
 Return the complete description and job-related fields, not a card-length summary. The backend restricts candidates to open eligible jobs and rechecks submission eligibility. Enforce eligibility in the D365 write transaction too. Map actual numeric enum values explicitly when necessary; do not assume they match these human-readable labels.
 
-## 2. `submitApplication` — existing
+## 2. `submitApplication`
 
 Proposed canonical request, with `_request` configurable:
 
@@ -104,6 +108,7 @@ Proposed canonical request, with `_request` configurable:
     "ResumeFileName": "resume.pdf",
     "ResumeBlobKey": "azure:0123456789abcdef0123456789abcdef.pdf",
     "ResumeSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "JDHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "ConsentAccepted": true,
     "ConsentVersion": "v1",
     "ConsentDateTime": "2026-10-13T09:00:00Z",
@@ -112,7 +117,7 @@ Proposed canonical request, with `_request` configurable:
 }
 ```
 
-Identity comes from the validated backend session, never trusted form identity fields. The private storage reference is metadata; no document Base64 is sent. `IdempotencyKey` is a proposed integration requirement that must be supported or mapped to an existing D365 request reference.
+Identity comes from the validated backend session, never trusted form identity fields. The private storage reference is metadata; no document Base64 is sent. The new source pack persists `IdempotencyKey` uniquely with an immutable submission content digest. `JDHash` and `ResumeSha256` are required 64-character SHA-256 values, supplied by the backend. The example hashes above are fictional.
 
 `FullName`, `Email`, `Phone`, and `LinkedInUrl` are the contact details the candidate confirmed for this application. `LinkedInProfileJson` is separate provider metadata: it contains the validated subject/issuer plus only available allowlisted name, given/family name, valid email, email-verification, HTTPS picture, and locale fields. Its nested keys retain OIDC snake_case names. It is omitted if no LinkedIn profile snapshot exists. The authenticated subject also stays in `LinkedInSub`; never infer a public profile URL or use a member URN as an email. Access/ID/refresh tokens and raw OAuth responses must not be stored in candidate/application tables.
 
@@ -132,12 +137,12 @@ Return a stable, non-empty `ApplicationId` belonging to the submitted candidate/
 
 Before acknowledging success, that transaction must save the candidate's basic contact information and optional provider-profile snapshot to the candidate master, then create the linked application with its confirmed contact snapshot, consent, and document reference. Only after acknowledgement does the backend queue resume/JD comparison. The AI result is saved through the separate `saveCandidateEvaluation` operation below; sign-in and profile prefill do not trigger either application submission or AI processing.
 
-## 3. `saveCandidateEvaluation` — pending
+## 3. `saveCandidateEvaluation`
 
 Suggested path after deployment:
 
 ```text
-/api/services/UBHRApplicationServiceGroup/UBHRApplicationService/saveCandidateEvaluation
+/api/services/UBHRPortalServiceGroup/UBHRPortalService/saveCandidateEvaluation
 ```
 
 Proposed request:
@@ -167,7 +172,7 @@ Proposed request:
 }
 ```
 
-`88` is illustrative. The production score comes from Azure OpenAI and is validated, not recomputed by Python. Collection fields are JSON **strings** because X++ memo fields store text; empty collections serialize as `"[]"`. Confirm whether the deployed service expects NoYes integers or JSON booleans and map accordingly.
+`88` is illustrative. The production score comes from Azure OpenAI and is validated, not recomputed by Python. Collection fields are JSON **strings** because X++ memo fields store text; empty collections serialize as `"[]"`. The new source-pack DTO uses actual JSON booleans; its table uses standard `NoYes` for the persisted criteria flag. A different existing service's wire representation must be mapped explicitly.
 
 Expected response:
 
@@ -175,16 +180,16 @@ Expected response:
 {"Success": true, "ApplicationId": "APP-000125"}
 ```
 
-Resolve the application in the configured company and upsert its one current evaluation transactionally. A repeated worker attempt must not create another evaluation. Set `AIStatus=Completed` only after the evaluation is actually saved. The service should assign/return `EvaluatedDateTime`; optional trace metadata may include a stable evaluation ID, JD hash, and resume hash if supported by the confirmed contract.
+Resolve the application in the configured company and upsert its one current evaluation transactionally. A repeated worker attempt must not create another evaluation. Set `AIStatus=Completed` only after the evaluation is actually saved. The source pack acknowledges a stable `EvaluationId`. Application reads return the completion time at **application-level** `EvaluatedDateTime`; the nested `Evaluation` does not contain that member because the backend's strict evaluation model excludes it. JD/resume hashes are kept on the application.
 
 If the path is missing or D365 rejects the write, the worker must retain/report the processing failure or pending retry rather than claiming D365 persistence. Persisting Processing/Failed state independently requires another supported D365 operation or an extension to this contract.
 
-## 4. `getTopCandidates` — pending
+## 4. `getTopCandidates`
 
 Suggested path after deployment:
 
 ```text
-/api/services/UBHRApplicationServiceGroup/UBHRApplicationService/getTopCandidates
+/api/services/UBHRPortalServiceGroup/UBHRPortalService/getTopCandidates
 ```
 
 Proposed request:
@@ -193,7 +198,7 @@ Proposed request:
 {"_request": {"Company": "DAT", "RequirementId": "REQ-0001", "Limit": 25}}
 ```
 
-Proposed response supporting the complete HR detail view:
+The source pack returns typed application rows with a nested `Evaluation`; see the [exact source-pack response](../d365/examples/getTopCandidates.response.json). The adapter also supports older flattened rows such as this illustrative alternative:
 
 ```json
 {
@@ -222,7 +227,7 @@ Proposed response supporting the complete HR detail view:
       "RubricVersion": "v1",
       "EvaluatedDateTime": "2026-10-13T09:02:00Z",
       "AIStatus": "Completed",
-      "HRStatus": "New",
+      "HRStatus": "Submitted",
       "ResumeFileName": "resume.pdf",
       "ResumeBlobKey": "azure:0123456789abcdef0123456789abcdef.pdf"
     }
@@ -234,9 +239,27 @@ Scope records to the selected requirement/company and order by score descending 
 
 `Limit` returns at most the requested top N; it is **not pagination or a total population count**. Search/filtering over those returned rows cannot claim to search all applications. Add confirmed server-side pagination, total counts, and search parameters before making such claims.
 
-## Additional read capabilities
+## 5. `getMyApplications`
 
-The four operations above do not define a candidate-owned application-history service or a general application lookup. Optional `D365_MY_APPLICATIONS_PATH` and `D365_APPLICATION_PATH` allow a separately deployed read contract. Without them, connected candidate history/detail operations report the unsupported integration capability instead of showing fixtures or another candidate's records.
+The new service includes owned history; configure `D365_MY_APPLICATIONS_PATH` after deployment. Its request is:
+
+```json
+{"_request":{"Company":"DAT","LinkedInIssuer":"https://www.linkedin.com","LinkedInSub":"validated-subject"}}
+```
+
+The response is `{"Applications":[...]}`, using the application DTO with immutable owner fields and nullable nested `Evaluation`. The backend supplies issuer/subject from the authenticated session and verifies every returned row's ownership. See the [full history example](../d365/examples/getMyApplications.response.json).
+
+## 6. `getApplication`
+
+Configure `D365_APPLICATION_PATH` after deploying this operation. Its request is:
+
+```json
+{"_request":{"Company":"DAT","ApplicationId":"returned-stable-application-id"}}
+```
+
+The source pack returns a single [application DTO directly](../d365/examples/getApplication.response.json), including immutable issuer/subject, document reference and nullable nested evaluation. Only the trusted backend integration identity receives this service capability. FastAPI checks candidate ownership or an authenticated HR role before returning detail/document responses.
+
+Without the configured read paths, connected candidate history/detail reports an integration error rather than returning fixtures. The notes below describe supported older-service fallback behavior, not the new six-operation deployment.
 
 History requests must scope by company and the validated LinkedIn issuer/subject. Single-application reads must return stable application/requirement IDs, owner issuer/subject, existing status, filename, and the private resume storage reference as required. Backend ownership validation remains mandatory even if D365 filters. HR document retrieval needs a trusted D365 application record/storage reference; arbitrary browser-supplied blob keys are never sufficient authorization.
 

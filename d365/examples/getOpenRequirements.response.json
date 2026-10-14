@@ -1,0 +1,26 @@
+{
+  "Requirements": [
+    {
+      "RequirementId": "REQ-2026-001",
+      "JobTitle": "Senior Frontend Engineer",
+      "JobDescription": "Build and maintain accessible React and TypeScript web applications for a customer support portal. Translate product designs into reusable components, integrate REST APIs, and maintain automated tests. Work with design and backend teams to improve usability and performance. Candidates should have at least 3 years of relevant frontend experience; the advertised range is 3 to 7 years. Demonstrated React and TypeScript project work is required. Accessibility testing, Git, and API integration are required. Azure DevOps delivery experience is preferred. A related degree or equivalent relevant professional experience is accepted.",
+      "Responsibilities": "Implement reusable frontend components; integrate REST APIs; write automated tests; review pull requests; improve accessibility and performance.",
+      "RequiredSkills": "React, TypeScript, REST API integration, Git, Accessibility testing",
+      "PreferredSkills": "Azure DevOps, Playwright",
+      "RequiredQualifications": "Related degree or equivalent relevant professional experience.",
+      "RequiredCertifications": "",
+      "Department": "Engineering",
+      "JobLocation": "Bengaluru, India",
+      "WorkMode": "Hybrid",
+      "EmploymentType": "FullTime",
+      "MinimumExperienceYears": 3.0,
+      "MaximumExperienceYears": 7.0,
+      "NumberOfOpenings": 2,
+      "JobStatus": "Open",
+      "PublishedDateTime": "2026-10-14T09:00:00Z",
+      "ClosingDateTime": "2026-12-31T23:59:59Z",
+      "EvaluationCriteriaJson": "{}",
+      "RubricVersion": "v1"
+    }
+  ]
+}

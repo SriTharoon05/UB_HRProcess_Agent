@@ -1,0 +1,22 @@
+{
+  "_request": {
+    "Company": "DAT",
+    "ApplicationId": "APP-00000000-0000-0000-0000-000000000001",
+    "RequirementId": "REQ-2026-001",
+    "IdempotencyKey": "evaluation:APP-00000000-0000-0000-0000-000000000001",
+    "Score": 73,
+    "MeetsMinimumCriteria": true,
+    "MatchLabel": "PartialEvidence",
+    "ScoreJustification": "Illustrative assessment: React and TypeScript delivery and relevant experience support the core requirement. Accessibility testing is partially evidenced and Azure DevOps delivery is not evidenced. Human review is required.",
+    "Summary": "Illustrative example only. Confirm the project evidence and accessibility testing depth in human review.",
+    "MatchedSkillsJson": "[{\"Requirement\":\"Demonstrated React and TypeScript project work\",\"ResumeSection\":\"Professional experience\",\"ProjectName\":\"Customer support portal\",\"Evidence\":\"Built React and TypeScript interfaces for a customer support portal.\",\"Reason\":\"The resume explicitly names both required technologies and the product delivered.\",\"EvidenceStrength\":\"High\"}]",
+    "PartiallyMatchedJson": "[{\"Requirement\":\"Accessibility testing\",\"ResumeSection\":\"Professional experience\",\"ProjectName\":\"Customer support portal\",\"Evidence\":\"Added keyboard navigation to shared interface components.\",\"Reason\":\"The example supports accessibility work, but does not describe systematic testing or an audit.\",\"EvidenceStrength\":\"Medium\"}]",
+    "MissingSkillsJson": "[{\"Requirement\":\"Azure DevOps delivery experience\",\"Reason\":\"No Azure DevOps delivery example is present in the illustrative resume.\"}]",
+    "EvidenceJson": "[{\"Requirement\":\"Demonstrated React and TypeScript project work\",\"ResumeSection\":\"Professional experience\",\"ProjectName\":\"Customer support portal\",\"Evidence\":\"Built React and TypeScript interfaces for a customer support portal.\",\"Reason\":\"The resume explicitly names both required technologies and the product delivered.\",\"EvidenceStrength\":\"High\"},{\"Requirement\":\"Accessibility testing\",\"ResumeSection\":\"Professional experience\",\"ProjectName\":\"Customer support portal\",\"Evidence\":\"Added keyboard navigation to shared interface components.\",\"Reason\":\"The example supports accessibility work, but does not describe systematic testing or an audit.\",\"EvidenceStrength\":\"Medium\"}]",
+    "EvaluationConfidence": "Medium",
+    "ModelDeployment": "gpt-4.1-mini",
+    "PromptVersion": "v1",
+    "RubricVersion": "v1",
+    "EvaluatedDateTime": "2026-10-14T09:02:00Z"
+  }
+}

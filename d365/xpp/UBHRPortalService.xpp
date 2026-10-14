@@ -1,0 +1,904 @@
+/// <summary>
+/// JSON custom service for the recruitment portal.
+/// All tables are SaveDataPerCompany=Yes. The mapped integration user's current
+/// company is the only permitted company. The authenticated Python backend,
+/// not an anonymous browser, supplies the validated candidate identity.
+/// </summary>
+public final class UBHRPortalService
+{
+    [SysEntryPointAttribute(true)]
+    public UBHRPortalRequirementsContract getOpenRequirements()
+    {
+        UBHRJobRequirement requirement;
+        UBHRPortalRequirementsContract result = new UBHRPortalRequirementsContract();
+        List records = new List(Types::Class);
+        utcDateTime now = DateTimeUtil::utcNow();
+        utcDateTime emptyDateTime = DateTimeUtil::minValue();
+
+        // Parameterless operation: POST {}. Per-company table selection uses
+        // curExt(), which must match the backend's D365_COMPANY configuration.
+        while select requirement
+            order by requirement.PublishedDateTime desc, requirement.RequirementId
+            where requirement.JobStatus == UBHRJobStatus::Open
+               && (requirement.PublishedDateTime == emptyDateTime
+                   || requirement.PublishedDateTime <= now)
+               && (requirement.ClosingDateTime == emptyDateTime
+                   || requirement.ClosingDateTime >= now)
+        {
+            records.addEnd(this.requirementContract(requirement));
+        }
+
+        result.parmRequirements(records);
+        return result;
+    }
+
+    [SysEntryPointAttribute(true)]
+    public UBHRPortalResultContract submitApplication(UBHRPortalRequestContract _request)
+    {
+        UBHRJobRequirement requirement;
+        UBHRCandidate candidate;
+        UBHRJobApplication application;
+        UBHRPortalResultContract result;
+        str identityKey;
+        str payloadHash;
+        str profileJson;
+        utcDateTime consentDateTime;
+        utcDateTime now;
+        int attempts;
+
+        this.requireCompany(_request);
+        this.requireText(_request.parmRequirementId(), 40, "RequirementId");
+        this.requireText(_request.parmLinkedInIssuer(), 255, "LinkedInIssuer");
+        this.requireText(_request.parmLinkedInSub(), 255, "LinkedInSub");
+        this.requireText(_request.parmFullName(), 200, "FullName");
+        this.requireEmail(_request.parmEmail());
+        this.requireText(_request.parmPhone(), 30, "Phone", false);
+        this.requireLinkedInUrl(_request.parmLinkedInUrl());
+        this.requireText(_request.parmResumeFileName(), 150, "ResumeFileName");
+        this.requireText(_request.parmResumeBlobKey(), 500, "ResumeBlobKey");
+        this.requirePrivateBlobKey(_request.parmResumeBlobKey());
+        this.requireHash(_request.parmResumeSha256(), "ResumeSha256");
+        this.requireHash(_request.parmJDHash(), "JDHash");
+        this.requireText(_request.parmConsentVersion(), 20, "ConsentVersion");
+        this.requireText(_request.parmIdempotencyKey(), 128, "IdempotencyKey");
+
+        if (!_request.parmConsentAccepted())
+        {
+            throw error("ConsentAccepted must be true before submitting an application.");
+        }
+
+        consentDateTime = this.parseUtc(_request.parmConsentDateTime(), "ConsentDateTime");
+        if (consentDateTime > DateTimeUtil::addMinutes(DateTimeUtil::utcNow(), 5))
+        {
+            throw error("ConsentDateTime cannot be in the future.");
+        }
+
+        profileJson = this.validatedProfile(_request);
+        identityKey = this.identityHash(_request.parmLinkedInIssuer(), _request.parmLinkedInSub());
+        payloadHash = this.submissionHash(_request);
+
+        try
+        {
+            ttsBegin;
+
+            select firstOnly forUpdate pessimisticLock application
+                where application.IdempotencyKey == _request.parmIdempotencyKey();
+
+            if (application.RecId)
+            {
+                // A lost acknowledgement must still be recoverable after the
+                // job closes. Reuse of a key with different data is an error.
+                if (application.PayloadHash != payloadHash
+                    || !this.sameText(application.LinkedInIssuer, _request.parmLinkedInIssuer())
+                    || !this.sameText(application.LinkedInSub, _request.parmLinkedInSub()))
+                {
+                    throw error("IdempotencyKey was already used for a different application.");
+                }
+
+                result = this.applicationResult(application, "Application was already accepted.");
+                ttsCommit;
+                return result;
+            }
+
+            // Pessimistically lock the requirement until application insertion
+            // commits. This prevents an overlapping close operation from
+            // accepting a new submission using an earlier eligibility check.
+            select firstOnly forUpdate pessimisticLock requirement
+                where requirement.RequirementId == _request.parmRequirementId();
+
+            now = DateTimeUtil::utcNow();
+            if (!requirement.RecId
+                || requirement.JobStatus != UBHRJobStatus::Open
+                || (requirement.PublishedDateTime != DateTimeUtil::minValue()
+                    && requirement.PublishedDateTime > now)
+                || (requirement.ClosingDateTime != DateTimeUtil::minValue()
+                    && requirement.ClosingDateTime < now))
+            {
+                throw error("The requirement is not accepting applications.");
+            }
+
+            select firstOnly forUpdate pessimisticLock candidate
+                where candidate.IdentityKey == identityKey;
+
+            if (candidate.RecId)
+            {
+                // Compare the original pair as well as the digest. The hash
+                // index is short enough for SQL and preserves case-sensitive
+                // OIDC identity without depending on a database collation.
+                if (!this.sameText(candidate.LinkedInIssuer, _request.parmLinkedInIssuer())
+                    || !this.sameText(candidate.LinkedInSub, _request.parmLinkedInSub()))
+                {
+                    throw error("The candidate identity key does not match its stored identity.");
+                }
+            }
+            else
+            {
+                candidate.clear();
+                candidate.initValue();
+                candidate.CandidateId = this.externalId("CAN-");
+                candidate.IdentityKey = identityKey;
+                candidate.LinkedInIssuer = _request.parmLinkedInIssuer();
+                candidate.LinkedInSub = _request.parmLinkedInSub();
+            }
+
+            candidate.FullName = _request.parmFullName();
+            candidate.Email = _request.parmEmail();
+            candidate.Phone = _request.parmPhone();
+            candidate.LinkedInUrl = _request.parmLinkedInUrl();
+            candidate.LinkedInProfileJson = profileJson;
+            candidate.ConsentVersion = _request.parmConsentVersion();
+            candidate.ConsentDateTime = consentDateTime;
+
+            if (!candidate.validateWrite())
+            {
+                throw error("The candidate record could not be validated.");
+            }
+
+            if (candidate.RecId)
+            {
+                candidate.update();
+            }
+            else
+            {
+                candidate.insert();
+            }
+
+            application.clear();
+            application.initValue();
+            application.ApplicationId = this.externalId("APP-");
+            application.CandidateRecId = candidate.RecId;
+            application.RequirementRecId = requirement.RecId;
+            application.RequirementId = requirement.RequirementId;
+            application.LinkedInIssuer = _request.parmLinkedInIssuer();
+            application.LinkedInSub = _request.parmLinkedInSub();
+            application.LinkedInProfileJson = profileJson;
+            application.FullName = _request.parmFullName();
+            application.Email = _request.parmEmail();
+            application.Phone = _request.parmPhone();
+            application.LinkedInUrl = _request.parmLinkedInUrl();
+            application.ResumeFileName = _request.parmResumeFileName();
+            application.ResumeBlobKey = _request.parmResumeBlobKey();
+            application.ResumeSha256 = strLwr(_request.parmResumeSha256());
+            application.JDHash = strLwr(_request.parmJDHash());
+            application.AppliedDateTime = now;
+            application.AIStatus = UBHRAIStatus::Pending;
+            application.HRStatus = UBHRHRStatus::Submitted;
+            application.ConsentVersion = _request.parmConsentVersion();
+            application.ConsentDateTime = consentDateTime;
+            application.IdempotencyKey = _request.parmIdempotencyKey();
+            application.PayloadHash = payloadHash;
+
+            if (!application.validateWrite())
+            {
+                throw error("The application record could not be validated.");
+            }
+
+            application.insert();
+            result = this.applicationResult(application, "Application accepted; evaluation is pending.");
+            ttsCommit;
+            return result;
+        }
+        catch (Exception::DuplicateKeyException)
+        {
+            // Unique IdentityKey / IdempotencyKey indexes resolve concurrent
+            // first submissions. Retry the whole atomic transaction, then
+            // reread the winner rather than create an additional application.
+            attempts++;
+            if (attempts >= 3)
+            {
+                throw error("Concurrent submission could not be resolved. Retry with the same IdempotencyKey.");
+            }
+            retry;
+        }
+        catch (Exception::UpdateConflict)
+        {
+            attempts++;
+            if (attempts >= 3)
+            {
+                throw error("Concurrent submission update could not be resolved. Retry with the same IdempotencyKey.");
+            }
+            retry;
+        }
+    }
+
+    [SysEntryPointAttribute(true)]
+    public UBHRPortalResultContract saveCandidateEvaluation(UBHRPortalRequestContract _request)
+    {
+        UBHRJobApplication application;
+        UBHRMatchEvaluation evaluation;
+        UBHRPortalResultContract result;
+        str payloadHash;
+        utcDateTime evaluatedDateTime;
+        int attempts;
+
+        this.requireCompany(_request);
+        this.requireText(_request.parmApplicationId(), 40, "ApplicationId");
+        this.requireText(_request.parmRequirementId(), 40, "RequirementId", false);
+        this.requireText(_request.parmIdempotencyKey(), 128, "IdempotencyKey");
+        if (_request.parmScore() < 0 || _request.parmScore() > 100)
+        {
+            throw error("Score must be between 0 and 100.");
+        }
+
+        if (!this.sameText(_request.parmMatchLabel(), "StrongEvidence")
+            && !this.sameText(_request.parmMatchLabel(), "PartialEvidence")
+            && !this.sameText(_request.parmMatchLabel(), "InsufficientEvidence"))
+        {
+            throw error("MatchLabel is not a supported evidence label.");
+        }
+        if (!this.sameText(_request.parmEvaluationConfidence(), "High")
+            && !this.sameText(_request.parmEvaluationConfidence(), "Medium")
+            && !this.sameText(_request.parmEvaluationConfidence(), "Low"))
+        {
+            throw error("EvaluationConfidence must be High, Medium, or Low.");
+        }
+
+        this.requireText(_request.parmScoreJustification(), 524288, "ScoreJustification");
+        this.requireText(_request.parmSummary(), 65536, "Summary");
+        this.requireText(_request.parmModelDeployment(), 100, "ModelDeployment");
+        this.requireText(_request.parmPromptVersion(), 30, "PromptVersion");
+        this.requireText(_request.parmRubricVersion(), 30, "RubricVersion", false);
+        this.requireJsonArray(_request.parmMatchedSkillsJson(), "MatchedSkillsJson");
+        this.requireJsonArray(_request.parmPartiallyMatchedJson(), "PartiallyMatchedJson");
+        this.requireJsonArray(_request.parmMissingSkillsJson(), "MissingSkillsJson");
+        this.requireJsonArray(_request.parmEvidenceJson(), "EvidenceJson");
+
+        evaluatedDateTime = _request.parmEvaluatedDateTime()
+            ? this.parseUtc(_request.parmEvaluatedDateTime(), "EvaluatedDateTime")
+            : DateTimeUtil::utcNow();
+        payloadHash = this.evaluationHash(_request);
+
+        try
+        {
+            ttsBegin;
+            select firstOnly forUpdate pessimisticLock application
+                where application.ApplicationId == _request.parmApplicationId();
+
+            if (!application.RecId)
+            {
+                throw error("The application does not exist in the configured company.");
+            }
+            if (_request.parmRequirementId()
+                && !this.sameText(application.RequirementId, _request.parmRequirementId()))
+            {
+                throw error("RequirementId does not match the application.");
+            }
+
+            select firstOnly forUpdate pessimisticLock evaluation
+                where evaluation.ApplicationRecId == application.RecId;
+
+            if (evaluation.RecId && evaluation.RequirementRecId != application.RequirementRecId)
+            {
+                throw error("The existing evaluation has an inconsistent requirement reference.");
+            }
+
+            if (!evaluation.RecId || evaluation.PayloadHash != payloadHash)
+            {
+                if (!evaluation.RecId)
+                {
+                    evaluation.clear();
+                    evaluation.initValue();
+                    evaluation.EvaluationId = this.externalId("EVA-");
+                    evaluation.ApplicationRecId = application.RecId;
+                    evaluation.RequirementRecId = application.RequirementRecId;
+                }
+
+                // Preserve the validated model score exactly. A changed payload
+                // replaces the current evaluation; historical versions require
+                // a separate history table and are outside this service.
+                evaluation.Score = _request.parmScore();
+                evaluation.MeetsMinimumCriteria = _request.parmMeetsMinimumCriteria() ? NoYes::Yes : NoYes::No;
+                evaluation.MatchLabel = _request.parmMatchLabel();
+                evaluation.ScoreJustification = _request.parmScoreJustification();
+                evaluation.Summary = _request.parmSummary();
+                evaluation.MatchedSkillsJson = _request.parmMatchedSkillsJson();
+                evaluation.PartiallyMatchedJson = _request.parmPartiallyMatchedJson();
+                evaluation.MissingSkillsJson = _request.parmMissingSkillsJson();
+                evaluation.EvidenceJson = _request.parmEvidenceJson();
+                evaluation.EvaluationConfidence = _request.parmEvaluationConfidence();
+                evaluation.ModelDeployment = _request.parmModelDeployment();
+                evaluation.PromptVersion = _request.parmPromptVersion();
+                evaluation.RubricVersion = _request.parmRubricVersion();
+                evaluation.EvaluatedDateTime = evaluatedDateTime;
+                evaluation.IdempotencyKey = _request.parmIdempotencyKey();
+                evaluation.PayloadHash = payloadHash;
+
+                if (!evaluation.validateWrite())
+                {
+                    throw error("The evaluation record could not be validated.");
+                }
+                if (evaluation.RecId)
+                {
+                    evaluation.update();
+                }
+                else
+                {
+                    evaluation.insert();
+                }
+            }
+
+            if (application.AIStatus != UBHRAIStatus::Completed)
+            {
+                application.AIStatus = UBHRAIStatus::Completed;
+                application.update();
+            }
+
+            result = this.applicationResult(application, "Current evaluation saved.");
+            result.parmEvaluationId(evaluation.EvaluationId);
+            ttsCommit;
+            return result;
+        }
+        catch (Exception::DuplicateKeyException)
+        {
+            attempts++;
+            if (attempts >= 3)
+            {
+                throw error("Concurrent evaluation could not be resolved. Retry the evaluation write.");
+            }
+            retry;
+        }
+        catch (Exception::UpdateConflict)
+        {
+            attempts++;
+            if (attempts >= 3)
+            {
+                throw error("Concurrent evaluation update could not be resolved. Retry the evaluation write.");
+            }
+            retry;
+        }
+    }
+
+    [SysEntryPointAttribute(true)]
+    public UBHRPortalCandidatesContract getTopCandidates(UBHRPortalRequestContract _request)
+    {
+        UBHRJobRequirement requirement;
+        UBHRJobApplication application;
+        UBHRMatchEvaluation evaluation;
+        UBHRPortalCandidatesContract result = new UBHRPortalCandidatesContract();
+        List records = new List(Types::Class);
+        int count;
+        int limit;
+
+        this.requireCompany(_request);
+        this.requireText(_request.parmRequirementId(), 40, "RequirementId");
+        limit = _request.parmLimit();
+        if (limit < 1 || limit > 100)
+        {
+            throw error("Limit must be between 1 and 100.");
+        }
+
+        select firstOnly requirement
+            where requirement.RequirementId == _request.parmRequirementId();
+        if (!requirement.RecId)
+        {
+            throw error("The requirement does not exist in the configured company.");
+        }
+
+        // Outer join retains submissions with no evaluation. SQL descending
+        // ordering puts unscored NULL rows after real scores, including zero.
+        while select application
+            where application.RequirementRecId == requirement.RecId
+            outer join evaluation
+                order by evaluation.Score desc, application.AppliedDateTime desc, application.ApplicationId
+                where evaluation.ApplicationRecId == application.RecId
+                   && evaluation.RequirementRecId == requirement.RecId
+        {
+            records.addEnd(this.applicationContract(application, evaluation));
+            count++;
+            if (count >= limit)
+            {
+                break;
+            }
+        }
+
+        result.parmCandidates(records);
+        return result;
+    }
+
+    [SysEntryPointAttribute(true)]
+    public UBHRPortalApplicationsContract getMyApplications(UBHRPortalRequestContract _request)
+    {
+        UBHRCandidate candidate;
+        UBHRJobApplication application;
+        UBHRMatchEvaluation evaluation;
+        UBHRPortalApplicationsContract result = new UBHRPortalApplicationsContract();
+        List records = new List(Types::Class);
+        str identityKey;
+
+        this.requireCompany(_request);
+        this.requireText(_request.parmLinkedInIssuer(), 255, "LinkedInIssuer");
+        this.requireText(_request.parmLinkedInSub(), 255, "LinkedInSub");
+        identityKey = this.identityHash(_request.parmLinkedInIssuer(), _request.parmLinkedInSub());
+
+        select firstOnly candidate where candidate.IdentityKey == identityKey;
+        if (candidate.RecId)
+        {
+            if (!this.sameText(candidate.LinkedInIssuer, _request.parmLinkedInIssuer())
+                || !this.sameText(candidate.LinkedInSub, _request.parmLinkedInSub()))
+            {
+                throw error("The candidate identity key does not match its stored identity.");
+            }
+
+            while select application
+                order by application.AppliedDateTime desc, application.ApplicationId
+                where application.CandidateRecId == candidate.RecId
+            {
+                // Original per-application ownership is immutable even when
+                // candidate contact/profile details change on a later job.
+                if (!this.sameText(application.LinkedInIssuer, _request.parmLinkedInIssuer())
+                    || !this.sameText(application.LinkedInSub, _request.parmLinkedInSub()))
+                {
+                    throw error("Application ownership is inconsistent with the candidate identity.");
+                }
+                evaluation.clear();
+                select firstOnly evaluation
+                    where evaluation.ApplicationRecId == application.RecId;
+                records.addEnd(this.applicationContract(application, evaluation));
+            }
+        }
+
+        result.parmApplications(records);
+        return result;
+    }
+
+    [SysEntryPointAttribute(true)]
+    public UBHRPortalApplicationContract getApplication(UBHRPortalRequestContract _request)
+    {
+        UBHRJobApplication application;
+        UBHRMatchEvaluation evaluation;
+
+        this.requireCompany(_request);
+        this.requireText(_request.parmApplicationId(), 40, "ApplicationId");
+        select firstOnly application
+            where application.ApplicationId == _request.parmApplicationId();
+        if (!application.RecId)
+        {
+            throw error("The application does not exist in the configured company.");
+        }
+        select firstOnly evaluation
+            where evaluation.ApplicationRecId == application.RecId;
+
+        // This operation is granted only to the backend integration identity.
+        // The backend checks candidate ownership or an authenticated HR role
+        // before returning application details or private document downloads.
+        return this.applicationContract(application, evaluation);
+    }
+
+    private UBHRPortalRequirementContract requirementContract(UBHRJobRequirement _requirement)
+    {
+        UBHRPortalRequirementContract result = new UBHRPortalRequirementContract();
+        result.parmRequirementId(_requirement.RequirementId);
+        result.parmJobTitle(_requirement.JobTitle);
+        result.parmJobDescription(_requirement.JobDescription);
+        result.parmResponsibilities(_requirement.Responsibilities);
+        result.parmRequiredSkills(_requirement.RequiredSkills);
+        result.parmPreferredSkills(_requirement.PreferredSkills);
+        result.parmRequiredQualifications(_requirement.RequiredQualifications);
+        result.parmRequiredCertifications(_requirement.RequiredCertifications);
+        result.parmDepartment(_requirement.Department);
+        result.parmJobLocation(_requirement.JobLocation);
+        result.parmWorkMode(_requirement.WorkMode);
+        result.parmEmploymentType(_requirement.EmploymentType);
+        result.parmMinimumExperienceYears(_requirement.MinimumExperienceYears);
+        result.parmMaximumExperienceYears(_requirement.MaximumExperienceYears);
+        result.parmNumberOfOpenings(_requirement.NumberOfOpenings);
+        result.parmJobStatus(this.jobStatusName(_requirement.JobStatus));
+        result.parmPublishedDateTime(this.utcText(_requirement.PublishedDateTime));
+        result.parmClosingDateTime(this.utcText(_requirement.ClosingDateTime));
+        result.parmRubricVersion(_requirement.RubricVersion);
+        if (_requirement.EvaluationCriteriaJson)
+        {
+            result.parmEvaluationCriteriaJson(_requirement.EvaluationCriteriaJson);
+        }
+        return result;
+    }
+
+    private UBHRPortalApplicationContract applicationContract(
+        UBHRJobApplication _application, UBHRMatchEvaluation _evaluation)
+    {
+        UBHRCandidate candidate;
+        UBHRJobRequirement requirement;
+        UBHRPortalApplicationContract result = new UBHRPortalApplicationContract();
+        select firstOnly candidate where candidate.RecId == _application.CandidateRecId;
+        select firstOnly requirement where requirement.RecId == _application.RequirementRecId;
+        if (!candidate.RecId || !requirement.RecId
+            || !this.sameText(_application.RequirementId, requirement.RequirementId))
+        {
+            throw error("Application references are inconsistent in the configured company.");
+        }
+
+        result.parmApplicationId(_application.ApplicationId);
+        result.parmCandidateId(candidate.CandidateId);
+        result.parmRequirementId(_application.RequirementId);
+        result.parmJobTitle(requirement.JobTitle);
+        result.parmFullName(_application.FullName);
+        result.parmEmail(_application.Email);
+        result.parmPhone(_application.Phone);
+        result.parmLinkedInUrl(_application.LinkedInUrl);
+        if (_application.LinkedInProfileJson)
+        {
+            result.parmLinkedInProfileJson(_application.LinkedInProfileJson);
+        }
+        result.parmAppliedDateTime(this.utcText(_application.AppliedDateTime));
+        result.parmHRStatus(this.hrStatusName(_application.HRStatus));
+        result.parmAIStatus(this.aiStatusName(_application.AIStatus));
+        result.parmResumeFileName(_application.ResumeFileName);
+        result.parmResumeBlobKey(_application.ResumeBlobKey);
+        result.parmLinkedInIssuer(_application.LinkedInIssuer);
+        result.parmLinkedInSub(_application.LinkedInSub);
+
+        if (_evaluation.RecId)
+        {
+            if (_evaluation.ApplicationRecId != _application.RecId
+                || _evaluation.RequirementRecId != _application.RequirementRecId)
+            {
+                throw error("Evaluation references do not match the application.");
+            }
+            result.parmEvaluatedDateTime(this.utcText(_evaluation.EvaluatedDateTime));
+            result.parmEvaluation(this.evaluationContract(_evaluation));
+        }
+        // Do not manufacture an evaluation or a zero score for pending rows.
+        return result;
+    }
+
+    private UBHRPortalEvaluationContract evaluationContract(UBHRMatchEvaluation _evaluation)
+    {
+        UBHRPortalEvaluationContract result = new UBHRPortalEvaluationContract();
+        result.parmScore(_evaluation.Score);
+        result.parmMeetsMinimumCriteria(_evaluation.MeetsMinimumCriteria == NoYes::Yes);
+        result.parmMatchLabel(_evaluation.MatchLabel);
+        result.parmScoreJustification(_evaluation.ScoreJustification);
+        result.parmSummary(_evaluation.Summary);
+        result.parmMatchedSkillsJson(_evaluation.MatchedSkillsJson);
+        result.parmPartiallyMatchedJson(_evaluation.PartiallyMatchedJson);
+        result.parmMissingSkillsJson(_evaluation.MissingSkillsJson);
+        result.parmEvidenceJson(_evaluation.EvidenceJson);
+        result.parmEvaluationConfidence(_evaluation.EvaluationConfidence);
+        result.parmModelDeployment(_evaluation.ModelDeployment);
+        result.parmPromptVersion(_evaluation.PromptVersion);
+        result.parmRubricVersion(_evaluation.RubricVersion);
+        return result;
+    }
+
+    private UBHRPortalResultContract applicationResult(UBHRJobApplication _application, str _message)
+    {
+        UBHRCandidate candidate;
+        UBHRPortalResultContract result = new UBHRPortalResultContract();
+        select firstOnly candidate where candidate.RecId == _application.CandidateRecId;
+        if (!candidate.RecId)
+        {
+            throw error("The application candidate reference is invalid.");
+        }
+        result.parmSuccess(true);
+        result.parmApplicationId(_application.ApplicationId);
+        result.parmCandidateId(candidate.CandidateId);
+        result.parmMessage(_message);
+        return result;
+    }
+
+    private void requireCompany(UBHRPortalRequestContract _request)
+    {
+        if (!_request)
+        {
+            throw error("The _request parameter is required.");
+        }
+        if (!_request.parmCompany()
+            || !System.String::Equals(_request.parmCompany(), curExt(), System.StringComparison::OrdinalIgnoreCase))
+        {
+            throw error("Company must match the integration user's configured current company.");
+        }
+    }
+
+    private void requireText(str _value, int _maximumLength, str _field, boolean _required = true)
+    {
+        if ((_required && !strLen(strLRTrim(_value))) || strLen(_value) > _maximumLength)
+        {
+            throw error(strFmt("%1 is missing or exceeds its supported length.", _field));
+        }
+    }
+
+    private void requireHash(str _value, str _field)
+    {
+        if (!System.Text.RegularExpressions.Regex::IsMatch(_value, "^[0-9a-fA-F]{64}$"))
+        {
+            throw error(strFmt("%1 must be a 64-character SHA-256 digest.", _field));
+        }
+    }
+
+    private void requireEmail(str _value)
+    {
+        System.Net.Mail.MailAddress address;
+        this.requireText(_value, 320, "Email");
+        try
+        {
+            address = new System.Net.Mail.MailAddress(_value);
+        }
+        catch (Exception::CLRError)
+        {
+            throw error("Email must be a contact email address.");
+        }
+        if (!this.sameText(address.get_Address(), _value))
+        {
+            throw error("Email must contain only a contact email address.");
+        }
+    }
+
+    private void requireLinkedInUrl(str _value)
+    {
+        System.Uri uri;
+        this.requireText(_value, 500, "LinkedInUrl", false);
+        if (!_value)
+        {
+            return;
+        }
+        try
+        {
+            uri = new System.Uri(_value, System.UriKind::Absolute);
+        }
+        catch (Exception::CLRError)
+        {
+            throw error("LinkedInUrl must be a valid HTTPS LinkedIn profile URL.");
+        }
+        if (uri.get_Scheme() != "https" || uri.get_UserInfo()
+            || !System.Text.RegularExpressions.Regex::IsMatch(uri.get_Host(), "^([a-zA-Z0-9-]+\\.)?linkedin\\.com$"))
+        {
+            throw error("LinkedInUrl must be a valid HTTPS LinkedIn profile URL.");
+        }
+    }
+
+    private void requirePrivateBlobKey(str _value)
+    {
+        // The backend owns private Azure Blob Storage access. Never persist a
+        // public document URL, SAS token, path traversal, or Base64 document.
+        if (strScan(_value, "://", 1, strLen(_value))
+            || strScan(_value, "?", 1, strLen(_value))
+            || strScan(_value, "\\", 1, strLen(_value))
+            || strScan(_value, "..", 1, strLen(_value))
+            || subStr(_value, 1, 1) == "/")
+        {
+            throw error("ResumeBlobKey must be a private relative storage object key.");
+        }
+    }
+
+    private str validatedProfile(UBHRPortalRequestContract _request)
+    {
+        str json = _request.parmLinkedInProfileJson();
+        str key;
+        Newtonsoft.Json.Linq.JObject profile;
+        Newtonsoft.Json.Linq.JToken token;
+        Newtonsoft.Json.Linq.JToken issuer;
+        Newtonsoft.Json.Linq.JToken subject;
+        Newtonsoft.Json.Linq.JToken value;
+        Newtonsoft.Json.Linq.JProperty property;
+
+        this.requireText(json, 16384, "LinkedInProfileJson", false);
+        if (!json)
+        {
+            return "";
+        }
+        try
+        {
+            profile = Newtonsoft.Json.Linq.JObject::Parse(json);
+        }
+        catch (Exception::CLRError)
+        {
+            throw error("LinkedInProfileJson must be a JSON object.");
+        }
+
+        // Request DTO defaults to an empty object when no provider snapshot
+        // exists. Preserve that absence instead of inventing profile fields.
+        if (!profile.get_HasValues())
+        {
+            return "";
+        }
+        issuer = profile.GetValue("issuer");
+        subject = profile.GetValue("sub");
+        if (issuer == null || subject == null
+            || issuer.get_Type() != Newtonsoft.Json.Linq.JTokenType::String
+            || subject.get_Type() != Newtonsoft.Json.Linq.JTokenType::String
+            || !this.sameText(issuer.ToString(), _request.parmLinkedInIssuer())
+            || !this.sameText(subject.ToString(), _request.parmLinkedInSub()))
+        {
+            throw error("LinkedInProfileJson must match the authenticated issuer and subject.");
+        }
+
+        token = profile.get_First();
+        while (token != null)
+        {
+            property = token as Newtonsoft.Json.Linq.JProperty;
+            key = property.get_Name();
+            value = property.get_Value();
+            if (!this.sameText(key, "issuer") && !this.sameText(key, "sub") && !this.sameText(key, "name")
+                && !this.sameText(key, "given_name") && !this.sameText(key, "family_name") && !this.sameText(key, "email")
+                && !this.sameText(key, "email_verified") && !this.sameText(key, "picture") && !this.sameText(key, "locale"))
+            {
+                throw error("LinkedInProfileJson contains an unsupported profile field.");
+            }
+            if ((this.sameText(key, "email_verified") && value.get_Type() != Newtonsoft.Json.Linq.JTokenType::Boolean)
+                || (!this.sameText(key, "email_verified") && value.get_Type() != Newtonsoft.Json.Linq.JTokenType::String))
+            {
+                throw error("LinkedInProfileJson contains an invalid profile field type.");
+            }
+            token = token.get_Next();
+        }
+        return json;
+    }
+
+    private void requireJsonArray(str _json, str _field)
+    {
+        Newtonsoft.Json.Linq.JArray array;
+        this.requireText(_json, 1048576, _field);
+        try
+        {
+            array = Newtonsoft.Json.Linq.JArray::Parse(_json);
+        }
+        catch (Exception::CLRError)
+        {
+            throw error(strFmt("%1 must contain a valid JSON array; use [] for an empty collection.", _field));
+        }
+    }
+
+    private utcDateTime parseUtc(str _value, str _field)
+    {
+        System.DateTimeOffset parsed;
+        System.DateTime utc;
+        this.requireText(_value, 40, _field);
+        // Require an explicit UTC suffix. DateTimeOffset.Parse then accepts
+        // fractional seconds and the backend's ISO +00:00 representation.
+        if (!System.Text.RegularExpressions.Regex::IsMatch(
+            _value, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,7})?(Z|\\+00:00)$"))
+        {
+            throw error(strFmt("%1 must be an ISO-8601 UTC timestamp.", _field));
+        }
+        try
+        {
+            parsed = System.DateTimeOffset::Parse(_value, System.Globalization.CultureInfo::get_InvariantCulture());
+            utc = parsed.get_UtcDateTime();
+            return DateTimeUtil::parse(utc.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo::get_InvariantCulture()));
+        }
+        catch (Exception::CLRError)
+        {
+            throw error(strFmt("%1 contains an invalid UTC timestamp.", _field));
+        }
+    }
+
+    private str utcText(utcDateTime _value)
+    {
+        return _value == DateTimeUtil::minValue() ? "" : DateTimeUtil::toStr(_value) + "Z";
+    }
+
+    private boolean sameText(str _left, str _right)
+    {
+        return System.String::Equals(_left, _right, System.StringComparison::Ordinal);
+    }
+
+    private str externalId(str _prefix)
+    {
+        System.Guid identifier = System.Guid::NewGuid();
+        return _prefix + identifier.ToString("D");
+    }
+
+    private str segment(str _value)
+    {
+        // Length prefixes distinguish pairs such as ("ab", "c") and ("a", "bc").
+        return int2Str(strLen(_value)) + ":" + _value;
+    }
+
+    private str sha256(str _value)
+    {
+        System.Text.Encoding encoding = System.Text.Encoding::get_UTF8();
+        System.Security.Cryptography.SHA256 algorithm = System.Security.Cryptography.SHA256::Create();
+        System.Byte[] bytes = encoding.GetBytes(_value);
+        System.Byte[] digest = algorithm.ComputeHash(bytes);
+        str result = System.BitConverter::ToString(digest);
+        algorithm.Dispose();
+        return strLwr(strRem(result, "-"));
+    }
+
+    private str identityHash(str _issuer, str _subject)
+    {
+        return this.sha256(this.segment(_issuer) + this.segment(_subject));
+    }
+
+    private str submissionHash(UBHRPortalRequestContract _request)
+    {
+        return this.sha256(
+            this.segment(_request.parmCompany())
+            + this.segment(_request.parmRequirementId())
+            + this.segment(_request.parmLinkedInIssuer())
+            + this.segment(_request.parmLinkedInSub())
+            + this.segment(_request.parmLinkedInProfileJson())
+            + this.segment(_request.parmFullName())
+            + this.segment(_request.parmEmail())
+            + this.segment(_request.parmPhone())
+            + this.segment(_request.parmLinkedInUrl())
+            + this.segment(_request.parmResumeFileName())
+            + this.segment(_request.parmResumeBlobKey())
+            + this.segment(_request.parmResumeSha256())
+            + this.segment(_request.parmJDHash())
+            + this.segment(_request.parmConsentVersion())
+            + this.segment(_request.parmConsentDateTime())
+            + this.segment(_request.parmConsentAccepted() ? "1" : "0")
+            + this.segment(_request.parmIdempotencyKey()));
+    }
+
+    private str evaluationHash(UBHRPortalRequestContract _request)
+    {
+        return this.sha256(
+            this.segment(_request.parmCompany())
+            + this.segment(_request.parmApplicationId())
+            + this.segment(_request.parmRequirementId())
+            + this.segment(int2Str(_request.parmScore()))
+            + this.segment(_request.parmMeetsMinimumCriteria() ? "1" : "0")
+            + this.segment(_request.parmMatchLabel())
+            + this.segment(_request.parmScoreJustification())
+            + this.segment(_request.parmSummary())
+            + this.segment(_request.parmMatchedSkillsJson())
+            + this.segment(_request.parmPartiallyMatchedJson())
+            + this.segment(_request.parmMissingSkillsJson())
+            + this.segment(_request.parmEvidenceJson())
+            + this.segment(_request.parmEvaluationConfidence())
+            + this.segment(_request.parmModelDeployment())
+            + this.segment(_request.parmPromptVersion())
+            + this.segment(_request.parmRubricVersion())
+            + this.segment(_request.parmEvaluatedDateTime())
+            + this.segment(_request.parmIdempotencyKey()));
+    }
+
+    private str jobStatusName(UBHRJobStatus _status)
+    {
+        switch (_status)
+        {
+            case UBHRJobStatus::Draft: return "Draft";
+            case UBHRJobStatus::Open: return "Open";
+            case UBHRJobStatus::Closed: return "Closed";
+        }
+        throw error("The requirement has an unsupported status.");
+    }
+
+    private str aiStatusName(UBHRAIStatus _status)
+    {
+        switch (_status)
+        {
+            case UBHRAIStatus::Pending: return "Pending";
+            case UBHRAIStatus::Processing: return "Processing";
+            case UBHRAIStatus::Completed: return "Completed";
+            case UBHRAIStatus::Failed: return "Failed";
+        }
+        throw error("The application has an unsupported processing status.");
+    }
+
+    private str hrStatusName(UBHRHRStatus _status)
+    {
+        switch (_status)
+        {
+            case UBHRHRStatus::Submitted: return "Submitted";
+            case UBHRHRStatus::Reviewing: return "Reviewing";
+            case UBHRHRStatus::Interview: return "Interview";
+            case UBHRHRStatus::Rejected: return "Rejected";
+            case UBHRHRStatus::Hired: return "Hired";
+            case UBHRHRStatus::Closed: return "Closed";
+        }
+        throw error("The application has an unsupported HR status.");
+    }
+}

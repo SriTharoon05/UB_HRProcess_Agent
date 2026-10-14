@@ -1,0 +1,21 @@
+{
+  "_request": {
+    "Company": "DAT",
+    "RequirementId": "REQ-2026-001",
+    "LinkedInIssuer": "https://www.linkedin.com",
+    "LinkedInSub": "fictional-member-001",
+    "LinkedInProfileJson": "{\"sub\":\"fictional-member-001\",\"issuer\":\"https://www.linkedin.com\",\"name\":\"Alex Example\",\"given_name\":\"Alex\",\"family_name\":\"Example\",\"picture\":\"https://example.invalid/fictional-avatar.png\",\"locale\":\"en_US\",\"email\":\"alex.example@example.com\",\"email_verified\":true}",
+    "FullName": "Alex Example",
+    "Email": "alex.example@example.com",
+    "Phone": "+91 90000 00000",
+    "LinkedInUrl": "https://www.linkedin.com/in/fictional-candidate-example/",
+    "ResumeFileName": "alex-example-resume.pdf",
+    "ResumeBlobKey": "azure:0123456789abcdef0123456789abcdef.pdf",
+    "ResumeSha256": "755e69d57688ec04927a174b2447d554a7f3b381e3497afea8797fd20223806e",
+    "JDHash": "70f0747e5522fabe6f19184c3399040265fd7c8583c1d9f7f92d659048f6bfbe",
+    "ConsentAccepted": true,
+    "ConsentVersion": "v1",
+    "ConsentDateTime": "2026-10-14T09:00:30Z",
+    "IdempotencyKey": "1b44d090199636845d4cb2af6248bf4918a9da7677de235f2feab4e19a938db7"
+  }
+}
