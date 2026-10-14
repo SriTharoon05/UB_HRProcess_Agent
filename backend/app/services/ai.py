@@ -90,17 +90,66 @@ def redact_identity(text: str) -> str:
 @traced("ai.evidence_validation")
 def validate_evidence(assessment: Assessment, resume: str, original: str) -> None:
     evidence_rows = assessment.matched_requirements + assessment.partially_matched_requirements + assessment.relevant_evidence
-    for item in evidence_rows:
-        if not item.evidence.strip() or item.evidence not in resume or item.evidence not in original:
-            log_event("ai.evidence_validation", "rejected", level=logging.WARNING, reason="untraceable_resume_quote", validated=False)
-            raise IntegrationError("AI returned supporting evidence that is not an exact resume quote", retryable=False)
-        if item.project_name and item.project_name not in resume:
-            log_event("ai.evidence_validation", "rejected", level=logging.WARNING, reason="project_not_in_resume", validated=False)
-            raise IntegrationError("AI returned a project name that is not present in the resume", retryable=False)
+    for index, item in enumerate(evidence_rows):
+        # PDF layout often wraps sentences and DOCX can contain nonbreaking spaces.
+        # Match whitespace only, then save the exact original source span. Never
+        # accept paraphrases, fuzzy similarity, changed numbers or omitted words.
+        quote = source_quote(item.evidence, original)
+        if not quote or not source_quote(item.evidence, resume):
+            log_event("ai.evidence_validation", "rejected", level=logging.WARNING, reason="untraceable_resume_quote", count=index, validated=False)
+            raise EvidenceValidationError("untraceable_resume_quote", "AI returned supporting evidence that is not an exact resume quote")
+        project = source_quote(item.project_name, original) if item.project_name else ""
+        if item.project_name and (not project or not source_quote(item.project_name, resume)):
+            log_event("ai.evidence_validation", "rejected", level=logging.WARNING, reason="project_not_in_resume", count=index, validated=False)
+            raise EvidenceValidationError("project_not_in_resume", "AI returned a project name that is not present in the resume")
+        item.evidence = quote
+        item.project_name = project
     if assessment.score > 0 and not evidence_rows:
         log_event("ai.evidence_validation", "rejected", level=logging.WARNING, reason="positive_score_without_evidence", validated=False)
-        raise IntegrationError("AI assigned an evidence score without any traceable supporting evidence", retryable=False)
+        raise EvidenceValidationError("positive_score_without_evidence", "AI assigned an evidence score without any traceable supporting evidence")
     log_event("ai.evidence_validation", "validated", count=len(evidence_rows), validated=True)
+
+
+class EvidenceValidationError(IntegrationError):
+    def __init__(self, reason: str, message: str):
+        super().__init__(message, retryable=False)
+        self.reason = reason
+
+
+def source_quote(quote: str, source: str) -> str:
+    """Recover a contiguous source span allowing only whitespace differences."""
+    normalized_quote = " ".join(quote.split())
+    if not normalized_quote:
+        return ""
+    # One pass maps normalized characters back to their original offsets.
+    characters, offsets = [], []
+    for index, character in enumerate(source):
+        if character.isspace():
+            if characters and characters[-1] != " ":
+                characters.append(" ")
+                offsets.append(index)
+        else:
+            characters.append(character)
+            offsets.append(index)
+    normalized_source = "".join(characters)
+    start = normalized_source.find(normalized_quote)
+    while start >= 0:
+        end = start + len(normalized_quote)
+        # Do not turn a fragment of a word or number into evidence.
+        before = start == 0 or not (normalized_source[start - 1].isalnum() and normalized_quote[0].isalnum())
+        after = end == len(normalized_source) or not (normalized_source[end].isalnum() and normalized_quote[-1].isalnum())
+        if before and after:
+            return source[offsets[start]:offsets[end - 1] + 1]
+        start = normalized_source.find(normalized_quote, start + 1)
+    return ""
+
+
+CORRECTION_RULES = {
+    "untraceable_resume_quote": "At least one evidence quote was not a contiguous quote from RESUME. Copy the exact text, preserving words, punctuation and numbers. Do not paraphrase, combine separate passages or use ellipses. Put unsupported requirements in not_evidenced_requirements.",
+    "project_not_in_resume": "At least one project_name was absent from RESUME. Copy a project title present in RESUME or use an empty project_name.",
+    "positive_score_without_evidence": "A positive score was returned with all supporting evidence lists empty. Reassess JOB against RESUME and include actual supporting quotes. If no job-related supporting evidence exists, return score 0, InsufficientEvidence and meets_minimum_criteria false, with explained gaps. A weak match is a valid assessment.",
+    "structured_output_invalid": "Return a complete response matching the required schema and types. Include supported quotes, explained gaps and an evidence-based integer score between 0 and 100.",
+}
 
 
 class AIService:
@@ -148,15 +197,15 @@ class AIService:
         log_event("ai.prompt_preparation", "completed", text_chars=len(resume), count=len(messages), prompt_version=version)
 
         @traced("ai.provider_request")
-        async def perform(client: Any) -> Assessment:
+        async def perform(client: Any, attempt: int) -> Assessment:
             try:
                 completion = await client.beta.chat.completions.parse(
                     model=self.settings.azure_openai_deployment,
-                    messages=messages,
+                    messages=[dict(message) for message in messages],
                     temperature=0.1,
                     response_format=Assessment,
                 )
-                log_event("ai.provider_response", "received", count=len(completion.choices))
+                log_event("ai.provider_response", "received", count=len(completion.choices), attempt=attempt)
                 log_event("ai.structured_validation", "start")
                 message = completion.choices[0].message
                 if getattr(message, "refusal", None) or getattr(message, "parsed", None) is None:
@@ -164,6 +213,7 @@ class AIService:
                     raise IntegrationError("Azure OpenAI did not provide a valid structured evaluation", retryable=False)
                 assessment = Assessment.model_validate(message.parsed)
                 log_event("ai.structured_validation", "completed", validated=True)
+                validate_evidence(assessment, resume, resume_text)
                 return assessment
             except (APIConnectionError, APITimeoutError) as exc:
                 log_event("ai.provider_request", "failed", level=logging.WARNING, exception_type=type(exc).__name__, retryable=True)
@@ -176,10 +226,28 @@ class AIService:
                 ) from exc
             except (ValidationError, ValueError, IndexError) as exc:
                 log_event("ai.structured_validation", "failed", level=logging.WARNING, exception_type=type(exc).__name__, validated=False)
-                raise IntegrationError("Azure OpenAI response failed structured validation", retryable=False) from exc
+                raise EvidenceValidationError("structured_output_invalid", "Azure OpenAI response failed structured validation") from exc
+
+        async def validated_assessment(client: Any) -> Assessment:
+            maximum_attempts = getattr(self.settings, "azure_openai_validation_attempts", 3)
+            for attempt in range(1, maximum_attempts + 1):
+                log_event("ai.validation_attempt", "start", attempt=attempt, max_attempts=maximum_attempts)
+                try:
+                    result = await perform(client, attempt)
+                    log_event("ai.validation_attempt", "completed", attempt=attempt, validated=True)
+                    return result
+                except EvidenceValidationError as exc:
+                    log_event("ai.validation_attempt", "failed", level=logging.WARNING, attempt=attempt,
+                              max_attempts=maximum_attempts, reason=exc.reason, retryable=attempt < maximum_attempts)
+                    if attempt == maximum_attempts:
+                        raise
+                    # Feedback contains only fixed validation instructions. Keep
+                    # the original JD and resume; never log model/candidate text.
+                    messages.append({"role": "user", "content": "The previous response failed validation. " + CORRECTION_RULES[exc.reason] + " Re-evaluate the original JOB and RESUME and return the complete corrected assessment."})
+            raise IntegrationError("AI validation attempt limit is invalid", retryable=False)
 
         if self.client is not None:
-            assessment = await perform(self.client)
+            assessment = await validated_assessment(self.client)
         else:
             async with AsyncAzureOpenAI(
                 azure_endpoint=self.settings.azure_openai_endpoint,
@@ -188,8 +256,7 @@ class AIService:
                 timeout=90.0,
                 max_retries=2,
             ) as client:
-                assessment = await perform(client)
-        validate_evidence(assessment, resume, resume_text)
+                assessment = await validated_assessment(client)
         log_event("ai.provenance", "start", deployment=self.settings.azure_openai_deployment, prompt_version=version)
         result = Evaluation.model_validate({
             **assessment.model_dump(),

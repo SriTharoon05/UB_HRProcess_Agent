@@ -85,6 +85,11 @@ export const api = {
     request<Candidate>(
       `/api/hr/jobs/${encodeURIComponent(jobId)}/candidates/${encodeURIComponent(id)}`,
     ),
+  retryEvaluation: (jobId: string, id: string) =>
+    request<{ success: boolean; application_id: string; ai_status: string; message: string }>(
+      `/api/hr/jobs/${encodeURIComponent(jobId)}/candidates/${encodeURIComponent(id)}/retry`,
+      { method: "POST" },
+    ),
   submit: (data: FormData, key: string) =>
     request<SubmissionResult>("/api/applications", {
       method: "POST",

@@ -335,12 +335,13 @@ describe('candidate status visibility', () => {
     expect(container.querySelector('.user-chip .avatar')).toHaveTextContent('C');
   });
 
-  it('links application records and separates application status from AI processing', async () => {
+  it('links application records without exposing internal AI processing', async () => {
     vi.mocked(api.applications).mockResolvedValue([pendingCandidate]);
     renderPage(<ApplicationsPage />);
     const row = await screen.findByRole('row', {name: /Frontend Engineer/});
     expect(within(row).getByText('Submitted')).toBeVisible();
-    expect(within(row).getByText('Queued')).toBeVisible();
+    expect(within(row).queryByText('Queued')).not.toBeInTheDocument();
+    expect(screen.queryByText('AI processing')).not.toBeInTheDocument();
     expect(within(row).getByRole('link', {name: 'Frontend Engineer'})).toHaveAttribute('href', `/candidate/applications/${pendingCandidate.application_id}`);
     expect(screen.queryByText(/86\/100/)).not.toBeInTheDocument();
   });
@@ -351,6 +352,6 @@ describe('candidate status visibility', () => {
     expect(api.application).toHaveBeenCalledWith(highCandidate.application_id);
     expect(screen.queryByText(highCandidate.evaluation!.score_justification)).not.toBeInTheDocument();
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
-    expect(screen.getByText(/Processing status is separate from a hiring decision/)).toBeVisible();
+    expect(screen.getByText(/The recruitment team will review your details and resume/)).toBeVisible();
   });
 });

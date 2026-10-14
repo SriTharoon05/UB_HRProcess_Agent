@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar,
   BarChart,
@@ -25,6 +25,7 @@ import {
   Linkedin,
   ListFilter,
   Mail,
+  RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -58,6 +59,35 @@ import {
 } from "../components/common";
 import { Button } from "../components/ui/button";
 import { Dialog } from "../components/ui/dialog";
+
+function RetryEvaluationButton({ requirementId, applicationId }: { requirementId: string; applicationId: string }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState("");
+  const retry = useMutation({
+    mutationFn: () => api.retryEvaluation(requirementId, applicationId),
+    onMutate: () => setError(""),
+    onSuccess: async () => {
+      toast.success("Evaluation queued. Keep the worker running.");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["candidate", requirementId, applicationId] }),
+        queryClient.invalidateQueries({ queryKey: ["candidates", requirementId] }),
+      ]);
+    },
+    onError: (failure: Error) => {
+      setError(failure.message);
+      toast.error(failure.message);
+    },
+  });
+  return (
+    <div>
+      <Button variant="secondary" size="sm" disabled={retry.isPending} onClick={() => retry.mutate()}>
+        <RefreshCw size={14} />
+        {retry.isPending ? "Queueing…" : "Retry evaluation"}
+      </Button>
+      {error && <p role="alert" className="small-note">{error}</p>}
+    </div>
+  );
+}
 
 export function HRDashboardPage() {
   const { session } = useAuth();
@@ -716,6 +746,7 @@ export function CandidateRankingPage() {
   const query = useQuery({
     queryKey: ["candidates", requirementId],
     queryFn: () => api.candidates(requirementId),
+    refetchInterval: (value) => value.state.data?.candidates.some((item) => ["pending", "queued", "processing", "retrying"].includes(item.ai_status.toLowerCase())) ? 5_000 : false,
   });
   const job = useQuery({
     queryKey: ["job", requirementId],
@@ -750,12 +781,17 @@ export function CandidateRankingPage() {
         title={job.data?.title || "Candidate evidence"}
         description={`${requirementId}${job.data?.department ? ` · ${job.data.department}` : ""}${job.data?.location ? ` · ${job.data.location}` : ""}`}
         action={
-          <Button asChild variant="outline">
-            <Link to={`/jobs/${requirementId}`}>
-              View job description
-              <ExternalLink size={14} />
-            </Link>
-          </Button>
+          <div>
+            <Button variant="secondary" disabled={query.isFetching} onClick={() => { void query.refetch(); }}>
+              <RefreshCw size={14} /> Refresh list
+            </Button>
+            <Button asChild variant="outline">
+              <Link to={`/jobs/${requirementId}`}>
+                View job description
+                <ExternalLink size={14} />
+              </Link>
+            </Button>
+          </div>
         }
       />
       <HumanReviewNotice />
@@ -926,6 +962,9 @@ export function CandidateRankingPage() {
                     </td>
                     <td>
                       <StatusBadge status={candidate.ai_status} />
+                      {candidate.ai_status.toLowerCase() === "failed" && (
+                        <RetryEvaluationButton requirementId={requirementId} applicationId={candidate.application_id} />
+                      )}
                     </td>
                     <td>{dateLabel(candidate.applied_date)}</td>
                     <td>
@@ -993,6 +1032,7 @@ export function CandidateDetailPage() {
   const query = useQuery({
     queryKey: ["candidate", requirementId, applicationId],
     queryFn: () => api.candidate(requirementId, applicationId),
+    refetchInterval: (value) => value.state.data && ["pending", "queued", "processing", "retrying"].includes(value.state.data.ai_status.toLowerCase()) ? 5_000 : false,
   });
   const [tab, setTab] = useState<
     "matched" | "partial" | "missing" | "evidence"
@@ -1312,19 +1352,18 @@ export function CandidateDetailPage() {
           ) : (
             <section className="card">
               <EmptyState
-                title="The evidence is still coming together"
-                description={`AI processing status: ${candidate.ai_status}. A completed evaluation will appear here when available. Your team can review the resume in the meantime.`}
+                title={candidate.ai_status.toLowerCase() === "failed" ? "Evaluation needs another attempt" : "The evidence is still coming together"}
+                description={`AI processing status: ${candidate.ai_status}. Your team can review the resume in the meantime. A score appears after evidence validation and D365 save confirmation.`}
                 icon={<Clock3 />}
                 action={
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      void query.refetch();
-                    }}
-                  >
-                    Check for an update
-                    <ArrowRight size={14} />
-                  </Button>
+                  candidate.ai_status.toLowerCase() === "failed" ? (
+                    <RetryEvaluationButton requirementId={requirementId} applicationId={applicationId} />
+                  ) : (
+                    <Button variant="secondary" onClick={() => { void query.refetch(); }}>
+                      Check for an update
+                      <ArrowRight size={14} />
+                    </Button>
+                  )
                 }
               />
             </section>

@@ -26,6 +26,7 @@ from app.observability import RequestLoggingMiddleware, configure_logging, log_c
 from app.profile import valid_contact_email
 from app.queue import SubmissionCoordinator, submission_fingerprint
 from app.metadata import SQLiteMetadata
+from app.retry_evaluation import retry as retry_evaluation
 from app.services.sqlite_d365 import connected_adapter
 from app.services.resumes import ResumeService
 
@@ -456,6 +457,26 @@ def create_app(settings: Settings | None = None):
         if record.requirement_id != requirement_id:
             raise HTTPException(404, "Candidate not found for this requirement")
         return (await processing_status(record)).public_dict()
+
+    @app.post("/api/hr/jobs/{requirement_id}/candidates/{application_id}/retry",
+              dependencies=[Depends(hr_user), Depends(require_csrf)])
+    @traced("hr.evaluation.retry")
+    async def retry_candidate_evaluation(requirement_id: str, application_id: str, request: Request):
+        if settings.demo_mode:
+            raise HTTPException(409, "Demo evaluations cannot be reprocessed. Use connected mode for AI evaluation.")
+        record = await app.state.adapter.get_application(application_id)
+        if record.requirement_id != requirement_id:
+            raise HTTPException(404, "Candidate not found for this requirement")
+        await app.state.limiter.check(request, upload=True)
+        if app.state.redis is None:
+            raise HTTPException(503, "The evaluation queue is unavailable. Please retry shortly.")
+        metadata = getattr(app.state.adapter, "metadata", None)
+        message = await retry_evaluation(application_id, settings, redis=app.state.redis,
+                                        metadata=metadata if isinstance(metadata, SQLiteMetadata) else None,
+                                        failed_only=True)
+        return {"success": True, "application_id": application_id,
+                "ai_status": (await processing_status(await app.state.adapter.get_application(application_id))).ai_status,
+                "message": message}
 
     @app.get("/api/hr/applications/{application_id}/resume", dependencies=[Depends(hr_user)])
     @traced("hr.resume.download")

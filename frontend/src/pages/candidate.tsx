@@ -1318,14 +1318,7 @@ export function ApplicationsPage() {
   const query = useQuery({
     queryKey: ["applications"],
     queryFn: api.applications,
-    refetchInterval: (value) =>
-      value.state.data?.some((item) =>
-        ["pending", "queued", "processing"].includes(
-          item.ai_status.toLowerCase(),
-        ),
-      )
-        ? 15_000
-        : false,
+    refetchInterval: 30_000,
   });
   return (
     <div className="page">
@@ -1372,7 +1365,6 @@ export function ApplicationsPage() {
                   <th>Application reference</th>
                   <th>Applied</th>
                   <th>Application status</th>
-                  <th>AI processing</th>
                   <th>
                     <span className="sr-only">Details</span>
                   </th>
@@ -1396,9 +1388,6 @@ export function ApplicationsPage() {
                     <td>{dateLabel(item.applied_date)}</td>
                     <td>
                       <StatusBadge status={item.hr_status} />
-                    </td>
-                    <td>
-                      <StatusBadge status={item.ai_status} />
                     </td>
                     <td>
                       <Link
@@ -1439,13 +1428,7 @@ export function ApplicationDetailPage() {
   const query = useQuery({
     queryKey: ["application", applicationId],
     queryFn: () => api.application(applicationId),
-    refetchInterval: (value) =>
-      value.state.data &&
-      ["pending", "queued", "processing"].includes(
-        value.state.data.ai_status.toLowerCase(),
-      )
-        ? 15_000
-        : false,
+    refetchInterval: 30_000,
   });
   if (query.isPending)
     return (
@@ -1520,21 +1503,12 @@ export function ApplicationDetailPage() {
                 <StatusBadge status={item.hr_status} />
               </dd>
             </div>
-            <div>
-              <dt>AI processing</dt>
-              <dd>
-                <StatusBadge status={item.ai_status} />
-              </dd>
-            </div>
           </dl>
           <div className="inclusive-note">
             <Clock3 size={19} />
             <p>
-              {["pending", "queued", "processing"].includes(
-                item.ai_status.toLowerCase(),
-              )
-                ? "Your application is still being processed. This page checks for updates automatically."
-                : "The recruitment team will review your application. Processing status is separate from a hiring decision."}
+              Your application has been received. The recruitment team will
+              review your details and resume. You can follow updates here.
             </p>
           </div>
         </section>

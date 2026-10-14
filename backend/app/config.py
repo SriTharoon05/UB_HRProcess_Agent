@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2025-03-01-preview"
     azure_openai_prompt_version: str = "v1"
     azure_openai_max_resume_chars: int = 100000
+    azure_openai_validation_attempts: int = Field(default=3, ge=1, le=3)
     azure_storage_connection_string: str = Field(default="", repr=False)
     azure_storage_container: str = "resumes"
     evaluation_max_attempts: int = Field(default=5, ge=1, le=10)

@@ -91,12 +91,12 @@ class Application(BaseModel):
     email: str
     applied_date: str | None = None
     hr_status: str = "Submitted"
-    ai_status: str = "Pending"
     resume_file_name: str = ""
     demo_fixture: bool = False
 
 
 class Candidate(Application):
+    ai_status: str = "Pending"
     candidate_id: str
     linkedin_url: str = ""
     evaluation: Evaluation | None = None

@@ -50,7 +50,6 @@ export interface Application {
   email: string;
   applied_date: string | null;
   hr_status: string;
-  ai_status: string;
   resume_file_name: string;
   demo_fixture?: boolean;
 }
@@ -82,6 +81,7 @@ export interface Evaluation {
   rubric_version: string;
 }
 export interface Candidate extends Application {
+  ai_status: string;
   candidate_id: string;
   linkedin_url: string;
   evaluation: Evaluation | null;

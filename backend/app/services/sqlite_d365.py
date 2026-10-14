@@ -134,6 +134,9 @@ class SQLiteD365Service(D365Service):
         await self.metadata.save_evaluation_state(application_id, state)
         values = evaluation.model_dump(mode="json")
         lean = {key: values[key] for key in LEAN_EVALUATION_FIELDS if key in values}
+        # F&O has one supported-skills JSON column. Keep partial evidence there
+        # with its EvidenceStrength, while SQLite retains the separate lists.
+        lean["matched_requirements"] = values["matched_requirements"] + values["partially_matched_requirements"]
         lean.update(company=self.settings.d365_company, application_id=application_id,
                     requirement_id=requirement_id, evaluation_id=evaluation_id)
         data = await self.call_d365_service("save_candidate_evaluation", lean)
