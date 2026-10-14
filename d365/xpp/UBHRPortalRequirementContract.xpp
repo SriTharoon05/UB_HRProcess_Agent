@@ -1,6 +1,4 @@
-/// <summary>
-/// A complete published requirement; text memo members must never be truncated.
-/// </summary>
+/// <summary>Public job requirement fields from UBJobRequirementTable. Dates use ISO YYYY-MM-DD text.</summary>
 [DataContractAttribute]
 public final class UBHRPortalRequirementContract
 {
@@ -19,9 +17,9 @@ public final class UBHRPortalRequirementContract
     real minimumExperienceYears;
     real maximumExperienceYears;
     int numberOfOpenings;
-    str jobStatus;
-    str publishedDateTime;
-    str closingDateTime;
+    str requirementStatus;
+    str openDate;
+    str closeDate;
     str evaluationCriteriaJson;
     str rubricVersion;
 
@@ -135,25 +133,25 @@ public final class UBHRPortalRequirementContract
         return numberOfOpenings;
     }
 
-    [DataMemberAttribute("JobStatus")]
-    public str parmJobStatus(str _jobStatus = jobStatus)
+    [DataMemberAttribute("RequirementStatus")]
+    public str parmRequirementStatus(str _requirementStatus = requirementStatus)
     {
-        jobStatus = _jobStatus;
-        return jobStatus;
+        requirementStatus = _requirementStatus;
+        return requirementStatus;
     }
 
-    [DataMemberAttribute("PublishedDateTime")]
-    public str parmPublishedDateTime(str _publishedDateTime = publishedDateTime)
+    [DataMemberAttribute("OpenDate")]
+    public str parmOpenDate(str _openDate = openDate)
     {
-        publishedDateTime = _publishedDateTime;
-        return publishedDateTime;
+        openDate = _openDate;
+        return openDate;
     }
 
-    [DataMemberAttribute("ClosingDateTime")]
-    public str parmClosingDateTime(str _closingDateTime = closingDateTime)
+    [DataMemberAttribute("CloseDate")]
+    public str parmCloseDate(str _closeDate = closeDate)
     {
-        closingDateTime = _closingDateTime;
-        return closingDateTime;
+        closeDate = _closeDate;
+        return closeDate;
     }
 
     [DataMemberAttribute("EvaluationCriteriaJson")]

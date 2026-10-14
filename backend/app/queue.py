@@ -1,36 +1,54 @@
-"""Durable submission outbox and idempotency state, never a business database.
+"""Submission coordination. Connected screenshot contracts keep a SQLite outbox.
 
-D365 must implement a unique IdempotencyKey constraint for crash-safe submission.
-Redis retains only temporary processing state and references to private resumes.
+Redis transports jobs and provides locks; the SQLite snapshot survives queue loss.
+The explicitly selected legacy contract retains its previous Redis behavior.
 """
 
 import asyncio
 import hashlib
 import json
+import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
 from app.errors import IntegrationError
+from app.metadata import SQLiteMetadata, encode
+
+logger = logging.getLogger(__name__)
 
 
 class SubmissionCoordinator:
     def __init__(self, settings, adapter, resumes, redis=None):
         self.settings, self.adapter, self.resumes, self.redis = settings, adapter, resumes, redis
+        metadata = getattr(adapter, "metadata", None)
+        self.metadata = metadata if isinstance(metadata, SQLiteMetadata) else None
         self.memory = {}
         self.locks = {}
 
     def key(self, user, idempotency_key):
-        digest = hashlib.sha256(f"{user.issuer}|{user.sub}|{idempotency_key}".encode()).hexdigest()
+        if self.metadata:
+            scope = [self.settings.d365_company, user.issuer, user.sub, idempotency_key]
+            digest = hashlib.sha256(encode(scope).encode()).hexdigest()
+        else:
+            # Keep existing Redis keys discoverable in explicitly selected
+            # legacy mode when upgrading an already running deployment.
+            digest = hashlib.sha256(f"{user.issuer}|{user.sub}|{idempotency_key}".encode()).hexdigest()
         return f"{self.settings.redis_prefix}:submission:{digest}"
 
     async def load(self, key):
+        if self.metadata:
+            return await self.metadata.get_submission(key)
         if self.redis:
             value = await self.redis.get(key)
             return json.loads(value) if value else None
         return self.memory.get(key)
 
     async def persist(self, key, record):
+        if self.metadata:
+            await self.metadata.update_submission(key, record)
+            return
         if self.redis:
             await self.redis.set(key, json.dumps(record), ex=self.settings.retention_days * 86400)
         else:
@@ -59,14 +77,19 @@ class SubmissionCoordinator:
             result = await self.adapter.submit_application(record["payload"])
             if not result.get("application_id"):
                 raise IntegrationError("Application service did not return an identifier", retryable=False)
+            if self.metadata and result["application_id"] != record["application_id"]:
+                raise IntegrationError("D365 changed the frozen ApplicationId", retryable=False)
             record.update(application_id=str(result["application_id"]), stage="accepted")
+            if self.metadata:
+                record.update(candidate_id=result["candidate_id"], hr_status="Submitted")
             await self.persist(key, record)
         if record["stage"] == "accepted":
             await self.enqueue(key, record)
+        state = await self.metadata.get_evaluation_state(record["application_id"]) if self.metadata else None
         return {
             "success": True,
             "application_id": record["application_id"],
-            "ai_status": "Completed" if self.settings.demo_mode else "Pending",
+            "ai_status": "Completed" if self.settings.demo_mode else (state or {}).get("status", "Pending"),
             "message": "Application submitted. Demo evaluation is a fictional sample."
             if self.settings.demo_mode
             else "Application submitted. Evidence evaluation is queued for human review.",
@@ -106,7 +129,8 @@ class SubmissionCoordinator:
                 "consent_accepted": True,
                 "consent_version": consent_version,
                 "consent_date": datetime.now(timezone.utc).isoformat(),
-                "idempotency_key": hashlib.sha256((key + fingerprint + job_hash).encode()).hexdigest(),
+                "idempotency_key": key.rsplit(":", 1)[-1] if self.metadata
+                else hashlib.sha256((key + fingerprint + job_hash).encode()).hexdigest(),
             }
             if user.linkedin_profile is not None:
                 # This snapshot comes from validated provider data, not editable
@@ -122,11 +146,25 @@ class SubmissionCoordinator:
                 "job_snapshot": job.model_dump(mode="json"),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            try:
-                await self.persist(key, record)
-            except Exception:
-                await self.resumes.delete(resume_ref)
-                raise
+            if self.metadata:
+                application_id = "APP-" + str(uuid.uuid4())
+                payload["application_id"] = application_id
+                record.update(application_id=application_id, company=self.settings.d365_company,
+                              payload_sha256=hashlib.sha256(encode(payload).encode()).hexdigest())
+                try:
+                    record, created = await self.metadata.reserve(key, record)
+                except Exception:
+                    await self.resumes.delete(resume_ref)
+                    raise
+                if not created:
+                    # A competing process reserved the immutable input first.
+                    await self.resumes.delete(resume_ref)
+            else:
+                try:
+                    await self.persist(key, record)
+                except Exception:
+                    await self.resumes.delete(resume_ref)
+                    raise
             return await self.finish(key, record)
         finally:
             try:
@@ -140,8 +178,12 @@ class SubmissionCoordinator:
     async def reconcile(self):
         if not self.redis:
             return
-        async for key in self.redis.scan_iter(match=f"{self.settings.redis_prefix}:submission:*"):
-            key = key.decode() if isinstance(key, bytes) else key
+        if self.metadata:
+            entries = await self.metadata.submissions(company=self.settings.d365_company)
+        else:
+            entries = [(key.decode() if isinstance(key, bytes) else key, None)
+                       async for key in self.redis.scan_iter(match=f"{self.settings.redis_prefix}:submission:*")]
+        for key, _ in entries:
             if key.endswith(":lock"):
                 continue
             record = await self.load(key)
@@ -149,8 +191,12 @@ class SubmissionCoordinator:
                 continue
             if record["stage"] == "queued":
                 application_id = record["application_id"]
-                evaluation = await self.redis.get(f"{self.settings.redis_prefix}:evaluation:{application_id}")
-                if evaluation and json.loads(evaluation).get("status") in {"Completed", "Failed"}:
+                if self.metadata:
+                    state = await self.metadata.get_evaluation_state(application_id) or {}
+                else:
+                    evaluation = await self.redis.get(f"{self.settings.redis_prefix}:evaluation:{application_id}")
+                    state = json.loads(evaluation) if evaluation else {}
+                if state.get("status") in {"Completed", "Failed"}:
                     continue
                 if await self.redis.exists(
                     f"arq:job:evaluation:{application_id}", f"arq:result:evaluation:{application_id}"
@@ -164,9 +210,7 @@ class SubmissionCoordinator:
                 except Exception:
                     # Do not log candidate data or external responses. Keep
                     # durable state to permit a later recovery attempt.
-                    import logging
-
-                    logging.getLogger(__name__).warning("submission_recovery_pending")
+                    logger.warning("submission_recovery_pending")
                 finally:
                     await lock.release()
 

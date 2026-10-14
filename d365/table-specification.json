@@ -1,996 +1,484 @@
 {
-  "format_version": 1,
-  "description": "Designer specification for a new F&O model, not SQL DDL or an importable metadata/model package.",
-  "model": "UBHRRecruitmentPortal",
-  "service_class": "UBHRPortalService",
-  "service_group": "UBHRPortalServiceGroup",
-  "system_fields": {
-    "automatic": [
-      "RecId",
-      "DataAreaId",
-      "RecVersion"
-    ],
-    "enabled_by_table_properties": [
-      "CreatedBy",
-      "CreatedDateTime",
-      "ModifiedBy",
-      "ModifiedDateTime"
+  "model": "UBHR_Nive",
+  "existing_tables": true,
+  "purpose": "Inventory of the user-provided existing AOT screenshots; no new D365 tables, fields, EDTs or enums are proposed.",
+  "field_types": "Existing EDT, enum, length and index properties were not provided. Inspect AOT Properties before build; do not infer enum ordinals from screenshots.",
+  "service": {
+    "class": "UBHRPortalService",
+    "aot_service": "UBHRPortalService",
+    "service_group": "UBHRPortalServiceGroup",
+    "operations": [
+      "getOpenRequirements",
+      "submitApplication",
+      "saveCandidateEvaluation"
     ]
   },
-  "edts": {
-    "UBHRExternalId": {
-      "type": "String",
-      "string_size": 40,
-      "meaning": "Requirement, candidate, application, or evaluation external ID"
-    },
-    "UBHRIdentityIssuer": {
-      "type": "String",
-      "string_size": 255,
-      "meaning": "Validated OIDC issuer; never a browser-supplied identity"
-    },
-    "UBHRIdentitySubject": {
-      "type": "String",
-      "string_size": 255,
-      "meaning": "Validated OIDC subject; never an email or public profile URL"
-    },
-    "UBHRHash": {
-      "type": "String",
-      "string_size": 64,
-      "meaning": "Lowercase hexadecimal SHA-256; also used for IdentityKey"
-    },
-    "UBHRIdempotencyKey": {
-      "type": "String",
-      "string_size": 128,
-      "meaning": "Persistent integration request reference"
-    },
-    "UBHRFullName": {
-      "type": "String",
-      "string_size": 200,
-      "meaning": "Candidate-confirmed full name"
-    },
-    "UBHREmail": {
-      "type": "String",
-      "string_size": 320,
-      "meaning": "Candidate-confirmed contact email"
-    },
-    "UBHRPhone": {
-      "type": "String",
-      "string_size": 30,
-      "meaning": "Optional candidate contact phone"
-    },
-    "UBHRUrl": {
-      "type": "String",
-      "string_size": 500,
-      "meaning": "Optional candidate-supplied HTTPS LinkedIn profile URL"
-    },
-    "UBHRResumeFileName": {
-      "type": "String",
-      "string_size": 150,
-      "meaning": "Sanitized display filename; matches the backend limit"
-    },
-    "UBHRBlobReference": {
-      "type": "String",
-      "string_size": 500,
-      "meaning": "Private storage reference including the unchanged azure: prefix"
-    },
-    "UBHRJobTitle": {
-      "type": "String",
-      "string_size": 200,
-      "meaning": "Advertised job title"
-    },
-    "UBHRDepartment": {
-      "type": "String",
-      "string_size": 100,
-      "meaning": "Advertised department"
-    },
-    "UBHRJobLocation": {
-      "type": "String",
-      "string_size": 150,
-      "meaning": "Advertised job location"
-    },
-    "UBHRCode": {
-      "type": "String",
-      "string_size": 30,
-      "meaning": "Work mode, employment type, or evidence match label"
-    },
-    "UBHRVersion": {
-      "type": "String",
-      "string_size": 30,
-      "meaning": "Prompt or rubric version"
-    },
-    "UBHRConsentVersion": {
-      "type": "String",
-      "string_size": 20,
-      "meaning": "Accepted privacy and processing notice version"
-    },
-    "UBHRModelDeployment": {
-      "type": "String",
-      "string_size": 100,
-      "meaning": "Actual Azure OpenAI deployment provenance"
-    },
-    "UBHRConfidence": {
-      "type": "String",
-      "string_size": 20,
-      "meaning": "Model evidence confidence label"
-    },
-    "UBHRExperienceYears": {
-      "type": "Real",
-      "meaning": "Actual minimum or maximum relevant experience in years"
-    },
-    "UBHRCount": {
-      "type": "Integer",
-      "meaning": "Actual number of advertised openings"
-    },
-    "UBHRMatchScore": {
-      "type": "Integer",
-      "meaning": "Evidence alignment score, validated between 0 and 100"
-    }
-  },
-  "standard_edts": {
-    "Notes": "Standard unbounded long-text EDT; use it for JD, prose and JSON memo fields.",
-    "RefRecId": "Standard Int64 EDT; explicit table relations below supply each foreign key."
-  },
-  "enums": {
-    "UBHRJobStatus": {
-      "is_extensible": false,
-      "members": [
-        {
-          "name": "Draft",
-          "value": 0
-        },
-        {
-          "name": "Open",
-          "value": 1
-        },
-        {
-          "name": "Closed",
-          "value": 2
-        }
-      ]
-    },
-    "UBHRAIStatus": {
-      "is_extensible": false,
-      "members": [
-        {
-          "name": "Pending",
-          "value": 0
-        },
-        {
-          "name": "Processing",
-          "value": 1
-        },
-        {
-          "name": "Completed",
-          "value": 2
-        },
-        {
-          "name": "Failed",
-          "value": 3
-        }
-      ]
-    },
-    "UBHRHRStatus": {
-      "is_extensible": false,
-      "members": [
-        {
-          "name": "Submitted",
-          "value": 0
-        },
-        {
-          "name": "Reviewing",
-          "value": 1
-        },
-        {
-          "name": "Interview",
-          "value": 2
-        },
-        {
-          "name": "Rejected",
-          "value": 3
-        },
-        {
-          "name": "Hired",
-          "value": 4
-        },
-        {
-          "name": "Closed",
-          "value": 5
-        }
-      ]
-    }
-  },
+  "extended_data_types": {},
+  "enums": {},
   "tables": {
-    "UBHRJobRequirement": {
-      "purpose": "Complete published requirement and JD context; adapt the service mapping if an existing requirement table is authoritative.",
-      "properties": {
-        "TableType": "Regular",
-        "SaveDataPerCompany": "Yes",
-        "CacheLookup": "None",
-        "CreatedBy": "Yes",
-        "CreatedDateTime": "Yes",
-        "ModifiedBy": "Yes",
-        "ModifiedDateTime": "Yes",
-        "PrimaryIndex": "SurrogateKey",
-        "ClusterIndex": "SurrogateKey",
-        "TableGroup": "Main",
-        "ReplacementKey": "RequirementIdIdx"
-      },
+    "UBJobRequirementTable": {
+      "existing": true,
       "fields": [
         {
-          "name": "RequirementId",
-          "aot_field_type": "String",
-          "meaning": "Stable external requirement ID, shared consistently with application.RequirementId",
-          "extended_data_type": "UBHRExternalId",
-          "mandatory": true
+          "name": "PositionId",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "DepartmentId",
+          "used_by_lean_service": false
         },
         {
           "name": "JobTitle",
-          "aot_field_type": "String",
-          "meaning": "Advertised job title",
-          "extended_data_type": "UBHRJobTitle",
-          "mandatory": false
-        },
-        {
-          "name": "JobDescription",
-          "aot_field_type": "String",
-          "meaning": "Complete JD, with no truncation to a card-length summary",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "Responsibilities",
-          "aot_field_type": "String",
-          "meaning": "Complete responsibilities",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "RequiredSkills",
-          "aot_field_type": "String",
-          "meaning": "Comma/newline-delimited required skills; the adapter normalizes them to a list",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "PreferredSkills",
-          "aot_field_type": "String",
-          "meaning": "Comma/newline-delimited preferred skills",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "MinimumExperienceYears",
-          "aot_field_type": "Real",
-          "meaning": "Actual advertised minimum; zero means an actual zero-year threshold in this baseline",
-          "extended_data_type": "UBHRExperienceYears",
-          "mandatory": false
-        },
-        {
-          "name": "MaximumExperienceYears",
-          "aot_field_type": "Real",
-          "meaning": "Actual advertised maximum; publish accurate values",
-          "extended_data_type": "UBHRExperienceYears",
-          "mandatory": false
-        },
-        {
-          "name": "RequiredQualifications",
-          "aot_field_type": "String",
-          "meaning": "Complete required qualifications",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "RequiredCertifications",
-          "aot_field_type": "String",
-          "meaning": "Comma/newline-delimited required certifications",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "Department",
-          "aot_field_type": "String",
-          "meaning": "Advertised department",
-          "extended_data_type": "UBHRDepartment",
-          "mandatory": false
+          "used_by_lean_service": true
         },
         {
           "name": "JobLocation",
-          "aot_field_type": "String",
-          "meaning": "Advertised location",
-          "extended_data_type": "UBHRJobLocation",
-          "mandatory": false
-        },
-        {
-          "name": "WorkMode",
-          "aot_field_type": "String",
-          "meaning": "Remote, Hybrid, or Onsite, as an actual string value",
-          "extended_data_type": "UBHRCode",
-          "mandatory": false
+          "used_by_lean_service": true
         },
         {
           "name": "EmploymentType",
-          "aot_field_type": "String",
-          "meaning": "FullTime, PartTime, Contract, or Internship",
-          "extended_data_type": "UBHRCode",
-          "mandatory": false
+          "used_by_lean_service": true
         },
         {
-          "name": "NumberOfOpenings",
-          "aot_field_type": "Integer",
-          "meaning": "Actual number of openings; publication requires a positive value",
-          "extended_data_type": "UBHRCount",
-          "mandatory": false
+          "name": "WorkMode",
+          "used_by_lean_service": true
         },
         {
-          "name": "JobStatus",
-          "aot_field_type": "Enum",
-          "meaning": "Draft / Open / Closed; default Draft",
-          "enum_type": "UBHRJobStatus",
-          "mandatory": false
+          "name": "RequirementStatus",
+          "used_by_lean_service": true
         },
         {
-          "name": "PublishedDateTime",
-          "aot_field_type": "UtcDateTime",
-          "meaning": "Actual UTC publication time",
-          "mandatory": false
+          "name": "RecruiterId",
+          "used_by_lean_service": false
         },
         {
-          "name": "ClosingDateTime",
-          "aot_field_type": "UtcDateTime",
-          "meaning": "Actual UTC closing time; an empty value represents no configured deadline",
-          "mandatory": false
+          "name": "OpenDate",
+          "used_by_lean_service": true
         },
         {
-          "name": "HiringManagerWorkerRecId",
-          "aot_field_type": "Int64",
-          "meaning": "Optional worker RecId; requires HcmWorker relation if used",
-          "extended_data_type": "RefRecId",
-          "mandatory": false
+          "name": "CloseDate",
+          "used_by_lean_service": true
         },
         {
-          "name": "RubricVersion",
-          "aot_field_type": "String",
-          "meaning": "Actual criteria version; empty when not provided",
-          "extended_data_type": "UBHRVersion",
-          "mandatory": false
+          "name": "Remarks",
+          "used_by_lean_service": false
         },
         {
-          "name": "EvaluationCriteriaJson",
-          "aot_field_type": "String",
-          "meaning": "Optional valid JSON object of job-specific evaluation criteria",
-          "extended_data_type": "Notes",
-          "mandatory": false,
-          "response_default": "{}"
-        }
-      ],
-      "indexes": [
-        {
-          "name": "RequirementIdIdx",
-          "fields": [
-            "RequirementId"
-          ],
-          "allow_duplicates": false,
-          "alternate_key": true
-        },
-        {
-          "name": "OpenRequirementsIdx",
-          "fields": [
-            "JobStatus",
-            "ClosingDateTime"
-          ],
-          "allow_duplicates": true,
-          "alternate_key": false
-        }
-      ],
-      "relations": [],
-      "optional_relations": [
-        {
-          "name": "HiringManagerWorker",
-          "related_table": "HcmWorker",
-          "relation_type": "Normal",
-          "field": "HiringManagerWorkerRecId",
-          "related_field": "RecId",
-          "cardinality": "ZeroMore",
-          "related_table_cardinality": "ZeroOne",
-          "relationship_type": "Association"
-        }
-      ],
-      "delete_actions": [
-        {
-          "name": "Applications",
-          "table": "UBHRJobApplication",
-          "relation": "Requirement",
-          "delete_action": "Restricted"
-        },
-        {
-          "name": "Evaluations",
-          "table": "UBHRMatchEvaluation",
-          "relation": "Requirement",
-          "delete_action": "Restricted"
-        }
-      ]
-    },
-    "UBHRCandidate": {
-      "purpose": "One current contact/profile master per authenticated LinkedIn identity in the configured company.",
-      "properties": {
-        "TableType": "Regular",
-        "SaveDataPerCompany": "Yes",
-        "CacheLookup": "None",
-        "CreatedBy": "Yes",
-        "CreatedDateTime": "Yes",
-        "ModifiedBy": "Yes",
-        "ModifiedDateTime": "Yes",
-        "PrimaryIndex": "SurrogateKey",
-        "ClusterIndex": "SurrogateKey",
-        "TableGroup": "Main",
-        "ReplacementKey": "CandidateIdIdx"
-      },
-      "fields": [
-        {
-          "name": "CandidateId",
-          "aot_field_type": "String",
-          "meaning": "Stable CAN- plus 36-character GUID; exactly 40 characters",
-          "extended_data_type": "UBHRExternalId",
-          "mandatory": true
-        },
-        {
-          "name": "IdentityKey",
-          "aot_field_type": "String",
-          "meaning": "SHA-256 of the service helper's unambiguous issuer/subject encoding; unique per company",
-          "extended_data_type": "UBHRHash",
-          "mandatory": true
-        },
-        {
-          "name": "LinkedInIssuer",
-          "aot_field_type": "String",
-          "meaning": "Validated immutable OIDC issuer",
-          "extended_data_type": "UBHRIdentityIssuer",
-          "mandatory": true
-        },
-        {
-          "name": "LinkedInSub",
-          "aot_field_type": "String",
-          "meaning": "Validated immutable OIDC subject",
-          "extended_data_type": "UBHRIdentitySubject",
-          "mandatory": true
-        },
-        {
-          "name": "FullName",
-          "aot_field_type": "String",
-          "meaning": "Current candidate-confirmed contact name",
-          "extended_data_type": "UBHRFullName",
-          "mandatory": true
-        },
-        {
-          "name": "Email",
-          "aot_field_type": "String",
-          "meaning": "Current candidate-confirmed contact email",
-          "extended_data_type": "UBHREmail",
-          "mandatory": true
-        },
-        {
-          "name": "Phone",
-          "aot_field_type": "String",
-          "meaning": "Optional current phone",
-          "extended_data_type": "UBHRPhone",
-          "mandatory": false
-        },
-        {
-          "name": "LinkedInUrl",
-          "aot_field_type": "String",
-          "meaning": "Optional supplied public profile URL; never derive it from a member URN",
-          "extended_data_type": "UBHRUrl",
-          "mandatory": false
-        },
-        {
-          "name": "LinkedInProfileJson",
-          "aot_field_type": "String",
-          "meaning": "Allowlisted provider profile, separate from edited contact data; no OAuth credentials",
-          "extended_data_type": "Notes",
-          "mandatory": false,
-          "content_default": "",
-          "response_default": "{}"
-        },
-        {
-          "name": "ConsentVersion",
-          "aot_field_type": "String",
-          "meaning": "Latest accepted notice version",
-          "extended_data_type": "UBHRConsentVersion",
-          "mandatory": true
-        },
-        {
-          "name": "ConsentDateTime",
-          "aot_field_type": "UtcDateTime",
-          "meaning": "Latest accepted consent timestamp",
-          "mandatory": false
-        }
-      ],
-      "indexes": [
-        {
-          "name": "CandidateIdIdx",
-          "fields": [
-            "CandidateId"
-          ],
-          "allow_duplicates": false,
-          "alternate_key": true
-        },
-        {
-          "name": "IdentityKeyIdx",
-          "fields": [
-            "IdentityKey"
-          ],
-          "allow_duplicates": false,
-          "alternate_key": false
-        }
-      ],
-      "relations": [],
-      "delete_actions": [
-        {
-          "name": "Applications",
-          "table": "UBHRJobApplication",
-          "relation": "Candidate",
-          "delete_action": "Restricted"
-        }
-      ]
-    },
-    "UBHRJobApplication": {
-      "purpose": "Immutable per-submission owner, contact, profile, document and consent snapshot, linked to candidate and requirement.",
-      "properties": {
-        "TableType": "Regular",
-        "SaveDataPerCompany": "Yes",
-        "CacheLookup": "None",
-        "CreatedBy": "Yes",
-        "CreatedDateTime": "Yes",
-        "ModifiedBy": "Yes",
-        "ModifiedDateTime": "Yes",
-        "PrimaryIndex": "SurrogateKey",
-        "ClusterIndex": "SurrogateKey",
-        "TableGroup": "Transaction",
-        "ReplacementKey": "ApplicationIdIdx"
-      },
-      "fields": [
-        {
-          "name": "ApplicationId",
-          "aot_field_type": "String",
-          "meaning": "Stable APP- plus 36-character GUID; exactly 40 characters",
-          "extended_data_type": "UBHRExternalId",
-          "mandatory": true
-        },
-        {
-          "name": "CandidateRecId",
-          "aot_field_type": "Int64",
-          "meaning": "FK to UBHRCandidate.RecId in the same company",
-          "extended_data_type": "RefRecId",
-          "mandatory": true
-        },
-        {
-          "name": "RequirementRecId",
-          "aot_field_type": "Int64",
-          "meaning": "FK to UBHRJobRequirement.RecId in the same company",
-          "extended_data_type": "RefRecId",
-          "mandatory": true
+          "name": "MinimumExperienceYears",
+          "used_by_lean_service": true
         },
         {
           "name": "RequirementId",
-          "aot_field_type": "String",
-          "meaning": "External requirement ID snapshot, consistent with the related requirement",
-          "extended_data_type": "UBHRExternalId",
-          "mandatory": true
+          "used_by_lean_service": true
         },
         {
-          "name": "LinkedInIssuer",
-          "aot_field_type": "String",
-          "meaning": "Immutable validated owner issuer snapshot",
-          "extended_data_type": "UBHRIdentityIssuer",
-          "mandatory": true
+          "name": "ExternalRequirementId",
+          "used_by_lean_service": false
         },
         {
-          "name": "LinkedInSub",
-          "aot_field_type": "String",
-          "meaning": "Immutable validated owner subject snapshot",
-          "extended_data_type": "UBHRIdentitySubject",
-          "mandatory": true
+          "name": "RequiredQualifications",
+          "used_by_lean_service": true
         },
         {
-          "name": "LinkedInProfileJson",
-          "aot_field_type": "String",
-          "meaning": "Provider profile captured for this application",
-          "extended_data_type": "Notes",
-          "mandatory": false,
-          "content_default": "",
-          "response_default": "{}"
+          "name": "NumberOfOpenings",
+          "used_by_lean_service": true
         },
         {
-          "name": "FullName",
-          "aot_field_type": "String",
-          "meaning": "Name confirmed for this application",
-          "extended_data_type": "UBHRFullName",
-          "mandatory": true
+          "name": "WorkflowStatus",
+          "used_by_lean_service": false
         },
         {
-          "name": "Email",
-          "aot_field_type": "String",
-          "meaning": "Contact email confirmed for this application",
-          "extended_data_type": "UBHREmail",
-          "mandatory": true
+          "name": "JobDescription",
+          "used_by_lean_service": true
         },
         {
-          "name": "Phone",
-          "aot_field_type": "String",
-          "meaning": "Optional contact phone snapshot",
-          "extended_data_type": "UBHRPhone",
-          "mandatory": false
+          "name": "Responsibilities",
+          "used_by_lean_service": true
         },
         {
-          "name": "LinkedInUrl",
-          "aot_field_type": "String",
-          "meaning": "Optional confirmed public profile URL",
-          "extended_data_type": "UBHRUrl",
-          "mandatory": false
+          "name": "RequiredSkills",
+          "used_by_lean_service": true
         },
         {
-          "name": "ResumeFileName",
-          "aot_field_type": "String",
-          "meaning": "Validated PDF/DOCX display filename, maximum 150 characters",
-          "extended_data_type": "UBHRResumeFileName",
-          "mandatory": true
+          "name": "PreferredSkills",
+          "used_by_lean_service": true
         },
         {
-          "name": "ResumeBlobKey",
-          "aot_field_type": "String",
-          "meaning": "Backend-owned private reference, unchanged; never a public URL or Base64 document",
-          "extended_data_type": "UBHRBlobReference",
-          "mandatory": true
+          "name": "RequiredCertifications",
+          "used_by_lean_service": true
         },
         {
-          "name": "ResumeSha256",
-          "aot_field_type": "String",
-          "meaning": "SHA-256 of the uploaded document bytes",
-          "extended_data_type": "UBHRHash",
-          "mandatory": true
+          "name": "PublishedDateTime",
+          "used_by_lean_service": false
         },
         {
-          "name": "JDHash",
-          "aot_field_type": "String",
-          "meaning": "SHA-256 of the complete JD context supplied with the accepted submission",
-          "extended_data_type": "UBHRHash",
-          "mandatory": true
+          "name": "HiringManagerWorkerRecId",
+          "used_by_lean_service": false
         },
         {
-          "name": "ResumeExtractJson",
-          "aot_field_type": "String",
-          "meaning": "Reserved optional extraction metadata; current service does not populate it",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "AppliedDateTime",
-          "aot_field_type": "UtcDateTime",
-          "meaning": "Server-assigned UTC application submission time",
-          "mandatory": false
-        },
-        {
-          "name": "AIStatus",
-          "aot_field_type": "Enum",
-          "meaning": "Pending initially; Completed only when evaluation transaction commits",
-          "enum_type": "UBHRAIStatus",
-          "mandatory": false
-        },
-        {
-          "name": "HRStatus",
-          "aot_field_type": "Enum",
-          "meaning": "Submitted initially; separate human-review workflow",
-          "enum_type": "UBHRHRStatus",
-          "mandatory": false
-        },
-        {
-          "name": "ConsentVersion",
-          "aot_field_type": "String",
-          "meaning": "Accepted notice version captured for this application",
-          "extended_data_type": "UBHRConsentVersion",
-          "mandatory": true
-        },
-        {
-          "name": "ConsentDateTime",
-          "aot_field_type": "UtcDateTime",
-          "meaning": "Accepted consent timestamp captured for this application",
-          "mandatory": false
-        },
-        {
-          "name": "IdempotencyKey",
-          "aot_field_type": "String",
-          "meaning": "Unique persistent submit request reference",
-          "extended_data_type": "UBHRIdempotencyKey",
-          "mandatory": true
-        },
-        {
-          "name": "PayloadHash",
-          "aot_field_type": "String",
-          "meaning": "Request-content SHA-256; a retry with changed contents must be rejected",
-          "extended_data_type": "UBHRHash",
-          "mandatory": true
-        }
-      ],
-      "indexes": [
-        {
-          "name": "ApplicationIdIdx",
-          "fields": [
-            "ApplicationId"
-          ],
-          "allow_duplicates": false,
-          "alternate_key": true
-        },
-        {
-          "name": "IdempotencyKeyIdx",
-          "fields": [
-            "IdempotencyKey"
-          ],
-          "allow_duplicates": false,
-          "alternate_key": false
-        },
-        {
-          "name": "CandidateDateIdx",
-          "fields": [
-            "CandidateRecId",
-            "AppliedDateTime"
-          ],
-          "allow_duplicates": true,
-          "alternate_key": false
-        },
-        {
-          "name": "RequirementDateIdx",
-          "fields": [
-            "RequirementRecId",
-            "AppliedDateTime"
-          ],
-          "allow_duplicates": true,
-          "alternate_key": false
-        }
-      ],
-      "relations": [
-        {
-          "name": "Candidate",
-          "related_table": "UBHRCandidate",
-          "relation_type": "Normal",
-          "field": "CandidateRecId",
-          "related_field": "RecId",
-          "cardinality": "ZeroMore",
-          "related_table_cardinality": "ExactlyOne",
-          "relationship_type": "Association"
-        },
-        {
-          "name": "Requirement",
-          "related_table": "UBHRJobRequirement",
-          "relation_type": "Normal",
-          "field": "RequirementRecId",
-          "related_field": "RecId",
-          "cardinality": "ZeroMore",
-          "related_table_cardinality": "ExactlyOne",
-          "relationship_type": "Association"
-        }
-      ],
-      "delete_actions": [
-        {
-          "name": "Evaluation",
-          "table": "UBHRMatchEvaluation",
-          "relation": "Application",
-          "delete_action": "Restricted"
-        }
-      ]
-    },
-    "UBHRMatchEvaluation": {
-      "purpose": "One current resume-versus-JD evaluation per application, separate from candidate and application contact information.",
-      "properties": {
-        "TableType": "Regular",
-        "SaveDataPerCompany": "Yes",
-        "CacheLookup": "None",
-        "CreatedBy": "Yes",
-        "CreatedDateTime": "Yes",
-        "ModifiedBy": "Yes",
-        "ModifiedDateTime": "Yes",
-        "PrimaryIndex": "SurrogateKey",
-        "ClusterIndex": "SurrogateKey",
-        "TableGroup": "Transaction",
-        "ReplacementKey": "EvaluationIdIdx"
-      },
-      "fields": [
-        {
-          "name": "EvaluationId",
-          "aot_field_type": "String",
-          "meaning": "Stable EVA- plus 36-character GUID; exactly 40 characters",
-          "extended_data_type": "UBHRExternalId",
-          "mandatory": true
-        },
-        {
-          "name": "ApplicationRecId",
-          "aot_field_type": "Int64",
-          "meaning": "FK to UBHRJobApplication.RecId; unique current evaluation",
-          "extended_data_type": "RefRecId",
-          "mandatory": true
-        },
-        {
-          "name": "RequirementRecId",
-          "aot_field_type": "Int64",
-          "meaning": "FK to the application's own requirement in the same company",
-          "extended_data_type": "RefRecId",
-          "mandatory": true
-        },
-        {
-          "name": "Score",
-          "aot_field_type": "Integer",
-          "meaning": "Actual validated model score, 0\u2013100; no automatic hire or rejection decision",
-          "extended_data_type": "UBHRMatchScore",
-          "mandatory": false
-        },
-        {
-          "name": "MeetsMinimumCriteria",
-          "aot_field_type": "Enum",
-          "meaning": "Evidence-based model assessment; DTO serializes this as a JSON boolean",
-          "enum_type": "NoYes",
-          "mandatory": false
-        },
-        {
-          "name": "MatchLabel",
-          "aot_field_type": "String",
-          "meaning": "Model evidence label, for example StrongEvidence, PartialEvidence, InsufficientEvidence",
-          "extended_data_type": "UBHRCode",
-          "mandatory": false
-        },
-        {
-          "name": "ScoreJustification",
-          "aot_field_type": "String",
-          "meaning": "Detailed explanation of the supplied score",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "Summary",
-          "aot_field_type": "String",
-          "meaning": "Overall evidence summary",
-          "extended_data_type": "Notes",
-          "mandatory": false
-        },
-        {
-          "name": "MatchedSkillsJson",
-          "aot_field_type": "String",
-          "meaning": "Serialized matched evidence array",
-          "extended_data_type": "Notes",
-          "mandatory": false,
-          "content_default": "[]"
-        },
-        {
-          "name": "PartiallyMatchedJson",
-          "aot_field_type": "String",
-          "meaning": "Serialized partial evidence array",
-          "extended_data_type": "Notes",
-          "mandatory": false,
-          "content_default": "[]"
-        },
-        {
-          "name": "MissingSkillsJson",
-          "aot_field_type": "String",
-          "meaning": "Serialized not-evidenced requirement array",
-          "extended_data_type": "Notes",
-          "mandatory": false,
-          "content_default": "[]"
-        },
-        {
-          "name": "EvidenceJson",
-          "aot_field_type": "String",
-          "meaning": "Serialized relevant evidence array",
-          "extended_data_type": "Notes",
-          "mandatory": false,
-          "content_default": "[]"
-        },
-        {
-          "name": "EvaluationConfidence",
-          "aot_field_type": "String",
-          "meaning": "Actual High / Medium / Low confidence label",
-          "extended_data_type": "UBHRConfidence",
-          "mandatory": false
-        },
-        {
-          "name": "ModelDeployment",
-          "aot_field_type": "String",
-          "meaning": "Actual deployment used for this evaluation",
-          "extended_data_type": "UBHRModelDeployment",
-          "mandatory": false
-        },
-        {
-          "name": "PromptVersion",
-          "aot_field_type": "String",
-          "meaning": "Actual version-controlled scoring prompt",
-          "extended_data_type": "UBHRVersion",
-          "mandatory": false
+          "name": "EvaluationCriteriaJson",
+          "used_by_lean_service": true
         },
         {
           "name": "RubricVersion",
-          "aot_field_type": "String",
-          "meaning": "Actual job rubric version when available",
-          "extended_data_type": "UBHRVersion",
-          "mandatory": false
+          "used_by_lean_service": true
+        },
+        {
+          "name": "MaximumExperienceYears",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "Department",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "JobStatus",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "ClosingDateTime",
+          "used_by_lean_service": false
+        }
+      ],
+      "lean_fields": [
+        "RequirementId",
+        "JobTitle",
+        "JobDescription",
+        "Responsibilities",
+        "RequiredSkills",
+        "PreferredSkills",
+        "RequiredQualifications",
+        "RequiredCertifications",
+        "Department",
+        "JobLocation",
+        "WorkMode",
+        "EmploymentType",
+        "MinimumExperienceYears",
+        "MaximumExperienceYears",
+        "NumberOfOpenings",
+        "RequirementStatus",
+        "OpenDate",
+        "CloseDate",
+        "EvaluationCriteriaJson",
+        "RubricVersion"
+      ]
+    },
+    "UBCandidateTable": {
+      "existing": true,
+      "fields": [
+        {
+          "name": "CandidateId",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "FirstName",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "LastName",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "LocationName",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "Qualification",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "CurrentCompany",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "Designation",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "ExperienceYears",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "CandidateStatus",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "Remarks",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "Email",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "Phone",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "NoticePeriodDays",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "RelevantExperienceYears",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "LinkedInProfileUrl",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "NaukriProfileId",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "SourceId",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "CandidateSource",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "LinkedInIssuer",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "LinkedInSub",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "IdentityKey",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "LinkedInProfileJson",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "ConsentVersion",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "ConsentDateTime",
+          "used_by_lean_service": false
+        }
+      ],
+      "lean_fields": [
+        "CandidateId",
+        "FirstName",
+        "LastName",
+        "Email",
+        "Phone",
+        "LinkedInProfileUrl",
+        "LinkedInIssuer",
+        "LinkedInSub",
+        "IdentityKey"
+      ]
+    },
+    "UBJobApplicationTable": {
+      "existing": true,
+      "fields": [
+        {
+          "name": "ApplicationId",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "CandidateId",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "RequirementId",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "ApplicationDate",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "ApplicationStatus",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "RecruiterId",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "Remarks",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "OverallScore",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "ResumeFileName",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "ResumeBlobKey",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "ResumeSha256",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "ConsentVersion",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "JDHash",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "AIStatus",
+          "used_by_lean_service": true
+        }
+      ],
+      "lean_fields": [
+        "ApplicationId",
+        "CandidateId",
+        "RequirementId",
+        "ApplicationStatus",
+        "AIStatus",
+        "OverallScore"
+      ]
+    },
+    "UBHRMatchEvaluationTable": {
+      "existing": true,
+      "fields": [
+        {
+          "name": "EvaluationId",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "ApplicationId",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "RequirementId",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "Score",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "MeetsMinimumCriteria",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "MatchLabel",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "Summary",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "MatchedSkillsJson",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "MissingSkillsJson",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "EvidenceJson",
+          "used_by_lean_service": true
+        },
+        {
+          "name": "ModelDeployment",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "PromptVersion",
+          "used_by_lean_service": false
+        },
+        {
+          "name": "RubricVersion",
+          "used_by_lean_service": false
         },
         {
           "name": "EvaluatedDateTime",
-          "aot_field_type": "UtcDateTime",
-          "meaning": "UTC completion time of the saved evaluation",
-          "mandatory": false
-        },
-        {
-          "name": "IdempotencyKey",
-          "aot_field_type": "String",
-          "meaning": "Evaluation worker request reference",
-          "extended_data_type": "UBHRIdempotencyKey",
-          "mandatory": true
-        },
-        {
-          "name": "PayloadHash",
-          "aot_field_type": "String",
-          "meaning": "Current evaluation content digest; identical retries reuse it and changed content replaces the current evaluation",
-          "extended_data_type": "UBHRHash",
-          "mandatory": true
+          "used_by_lean_service": false
         }
       ],
-      "indexes": [
-        {
-          "name": "EvaluationIdIdx",
-          "fields": [
-            "EvaluationId"
-          ],
-          "allow_duplicates": false,
-          "alternate_key": true
-        },
-        {
-          "name": "ApplicationIdx",
-          "fields": [
-            "ApplicationRecId"
-          ],
-          "allow_duplicates": false,
-          "alternate_key": false
-        },
-        {
-          "name": "RequirementScoreIdx",
-          "fields": [
-            "RequirementRecId",
-            "Score"
-          ],
-          "allow_duplicates": true,
-          "alternate_key": false
-        }
-      ],
-      "relations": [
-        {
-          "name": "Application",
-          "related_table": "UBHRJobApplication",
-          "relation_type": "Normal",
-          "field": "ApplicationRecId",
-          "related_field": "RecId",
-          "cardinality": "ZeroOne",
-          "related_table_cardinality": "ExactlyOne",
-          "relationship_type": "Association"
-        },
-        {
-          "name": "Requirement",
-          "related_table": "UBHRJobRequirement",
-          "relation_type": "Normal",
-          "field": "RequirementRecId",
-          "related_field": "RecId",
-          "cardinality": "ZeroMore",
-          "related_table_cardinality": "ExactlyOne",
-          "relationship_type": "Association"
-        }
-      ],
-      "delete_actions": []
+      "lean_fields": [
+        "EvaluationId",
+        "ApplicationId",
+        "RequirementId",
+        "Score",
+        "MeetsMinimumCriteria",
+        "MatchLabel",
+        "Summary",
+        "MatchedSkillsJson",
+        "MissingSkillsJson",
+        "EvidenceJson"
+      ]
     }
   },
+  "index_checks": [
+    {
+      "table": "UBJobRequirementTable",
+      "fields": [
+        "RequirementId"
+      ],
+      "requirement": "A requirement identifier must select one record in the configured legal entity."
+    },
+    {
+      "table": "UBCandidateTable",
+      "screenshot_index": "UBCandidateIdx",
+      "fields": [
+        "CandidateId"
+      ],
+      "requirement": "Verify an existing index on CandidateId has AllowDuplicates=No."
+    },
+    {
+      "table": "UBCandidateTable",
+      "screenshot_index": "UBIdentityKeyIdx",
+      "fields": [
+        "IdentityKey"
+      ],
+      "requirement": "Verify AllowDuplicates=No. Clean old blank/duplicate keys before enabling uniqueness."
+    },
+    {
+      "table": "UBJobApplicationTable",
+      "fields": [
+        "ApplicationId"
+      ],
+      "requirement": "Verify an index on ApplicationId has AllowDuplicates=No; retries and concurrent requests depend on it."
+    },
+    {
+      "table": "UBHRMatchEvaluationTable",
+      "screenshot_index": "EvaluationIdIdx",
+      "fields": [
+        "EvaluationId"
+      ],
+      "requirement": "Verify AllowDuplicates=No; deterministic EvaluationId protects retry writes."
+    }
+  ],
+  "required_existing_field_properties": {
+    "external_ids": "CandidateId, ApplicationId and EvaluationId must store at least 40 characters; references must use compatible lengths. RequirementId must preserve your existing requirement identifier.",
+    "identity_key": "IdentityKey must store 64 hexadecimal characters.",
+    "long_text": "Existing JD, Summary and evidence JSON fields must preserve complete text; use existing appropriate memo EDTs rather than truncating them.",
+    "company_scope": "Verify existing tables and indexes enforce the intended legal-entity scope. Service uses curExt() and requires Company to match."
+  },
+  "sqlite_metadata": [
+    "created/application/evaluation timestamps",
+    "private resume filename and blob reference",
+    "resume and JD hashes",
+    "immutable application contacts and validated LinkedIn profile snapshot",
+    "consent details",
+    "submission key and frozen payload",
+    "complete JD snapshot",
+    "full validated evaluation including score justification, partial evidence, confidence and model/prompt/rubric provenance",
+    "queue/outbox acknowledgement and processing metadata"
+  ],
   "conventions": [
-    "SaveDataPerCompany=Yes: F&O adds company scoping to database keys. Do not create a duplicate DataAreaId field or manually add it to every index.",
-    "Never put LinkedInIssuer + LinkedInSub into a wide composite string index. The unique IdentityKey digest avoids the SQL index-key length issue; service also compares the full stored identity.",
-    "The same UBHRExternalId EDT is used for all external IDs, including requirement snapshots; there is no 40/50 discrepancy.",
-    "Notes preserves full JD and JSON. Do not replace it with String(1000), String(4000), or a fictitious Memo primitive field type.",
-    "Content defaults and response defaults are service/DTO rules, not SQL Default properties on AOT fields. Absent optional profile snapshots persist blank and serialize as {}.",
-    "The service returns explicit English status names; UI and adapter do not depend on translated enum labels or numeric enum values.",
-    "No Base64 documents, access tokens, ID tokens, refresh tokens, or OAuth session state belong in these tables.",
-    "Existing requirement-table adaptation is a separate mapping task; this baseline never overwrites a pre-existing table."
+    "Do not add the previous UBHRJobRequirement/UBHRCandidate/UBHRJobApplication/UBHRMatchEvaluation baseline tables.",
+    "Existing screenshot metadata fields remain unchanged and are not assigned by the lean service; F&O kernel/default initValue behavior may still initialize system or default values.",
+    "RequirementStatus is the source for eligibility, not the separate JobStatus field; OpenDate/CloseDate are inclusive dates.",
+    "No new business columns are needed for the requested three-operation workflow."
   ]
 }

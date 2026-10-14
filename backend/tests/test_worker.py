@@ -25,7 +25,7 @@ async def durable_context(tmp_path):
         pytest.skip("Set REDIS_TEST_URL for isolated live Redis durability tests")
     redis = await create_pool(RedisSettings.from_dsn(redis_url))
     prefix = "backend-test-" + uuid.uuid4().hex
-    settings = Settings(_env_file=None, demo_mode=False, redis_url=redis_url, redis_prefix=prefix, local_resume_dir=tmp_path)
+    settings = Settings(_env_file=None, demo_mode=False, d365_contract_mode="legacy", redis_url=redis_url, redis_prefix=prefix, local_resume_dir=tmp_path)
     adapter = Mock()
     adapter.submit_application = AsyncMock(return_value={"application_id": prefix + "-application"})
     adapter.save_candidate_evaluation = AsyncMock(return_value={"success": True})

@@ -21,10 +21,11 @@ from app.auth import OIDC, OpaqueSessionMiddleware, SessionStore, candidate_user
 from app.config import Settings, get_settings
 from app.demo import DemoAdapter
 from app.errors import IntegrationError, ResumeValidationError
-from app.models import Application, User
+from app.models import Application, Job, User
 from app.profile import valid_contact_email
 from app.queue import SubmissionCoordinator, submission_fingerprint
-from app.services.d365 import D365Service
+from app.metadata import SQLiteMetadata
+from app.services.sqlite_d365 import connected_adapter
 from app.services.resumes import ResumeService
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,9 @@ def create_app(settings: Settings | None = None):
 
     @asynccontextmanager
     async def lifespan(app):
+        metadata = getattr(app.state.adapter, "metadata", None)
+        if isinstance(metadata, SQLiteMetadata):
+            await metadata.initialize()
         if not settings.demo_mode:
             app.state.redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
             await app.state.redis.ping()
@@ -126,7 +130,7 @@ def create_app(settings: Settings | None = None):
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.redis = None
-    app.state.adapter = DemoAdapter() if settings.demo_mode else D365Service(settings)
+    app.state.adapter = DemoAdapter() if settings.demo_mode else connected_adapter(settings)
     app.state.resumes = ResumeService(settings)
     app.state.coordinator = SubmissionCoordinator(settings, app.state.adapter, app.state.resumes)
     app.state.limiter = RateLimiter(settings)
@@ -305,18 +309,6 @@ def create_app(settings: Settings | None = None):
                 or parsed.password
             ):
                 raise HTTPException(422, "LinkedIn profile must be an HTTPS linkedin.com URL")
-        job = await get_job(requirement_id)
-        if job.deadline:
-            try:
-                deadline = datetime.fromisoformat(job.deadline.replace("Z", "+00:00"))
-                if deadline.tzinfo is None:
-                    deadline = deadline.replace(tzinfo=timezone.utc)
-                if deadline < datetime.now(timezone.utc):
-                    raise HTTPException(409, "This job requirement is no longer accepting applications")
-            except ValueError:
-                raise IntegrationError(
-                    "Job service returned an invalid application deadline", retryable=False
-                ) from None
         data = await resume.read(settings.max_resume_size_mb * 1024 * 1024 + 1)
         filename = PurePath((resume.filename or "resume").replace("\\", "/")).name
         if len(filename) > 150 or any(ord(c) < 32 for c in filename):
@@ -328,12 +320,31 @@ def create_app(settings: Settings | None = None):
         fingerprint = submission_fingerprint(
             requirement_id, data, phone, linkedin_url, consent_version, candidate_name=candidate_name, email=email
         )
+        existing = None
+        if app.state.coordinator.metadata:
+            existing = await app.state.coordinator.load(app.state.coordinator.key(application_user, idempotency_key))
+        if existing:
+            # A frozen retry can finish a previously accepted submission after the job closes.
+            job = Job.model_validate(existing["job_snapshot"])
+        else:
+            job = await get_job(requirement_id)
+            if job.deadline:
+                try:
+                    deadline = datetime.fromisoformat(job.deadline.replace("Z", "+00:00"))
+                    if deadline.tzinfo is None:
+                        deadline = deadline.replace(tzinfo=timezone.utc)
+                    if deadline < datetime.now(timezone.utc):
+                        raise HTTPException(409, "This job requirement is no longer accepting applications")
+                except ValueError:
+                    raise IntegrationError(
+                        "Job service returned an invalid application deadline", retryable=False
+                    ) from None
         return await app.state.coordinator.submit(
             application_user, idempotency_key, fingerprint, job, data, filename, phone, linkedin_url, consent_version
         )
 
     async def processing_status(record):
-        if app.state.redis:
+        if app.state.redis and not isinstance(getattr(app.state.adapter, "metadata", None), SQLiteMetadata):
             value = await app.state.redis.get(f"{settings.redis_prefix}:evaluation:{record.application_id}")
             if value:
                 record = record.model_copy(update={"ai_status": json.loads(value)["status"]})
@@ -372,7 +383,7 @@ def create_app(settings: Settings | None = None):
 
     @app.get("/api/hr/jobs/{requirement_id}/candidates/{application_id}", dependencies=[Depends(hr_user)])
     async def candidate_detail(requirement_id: str, application_id: str):
-        if not settings.demo_mode and not settings.d365_application_path:
+        if not settings.demo_mode and settings.d365_contract_mode == "legacy" and not settings.d365_application_path:
             records = await app.state.adapter.get_top_candidates(requirement_id, 100)
             record = next((c for c in records if c.application_id == application_id), None)
             if not record:
@@ -385,7 +396,7 @@ def create_app(settings: Settings | None = None):
 
     @app.get("/api/hr/applications/{application_id}/resume", dependencies=[Depends(hr_user)])
     async def resume_download(application_id: str, requirement_id: str = ""):
-        if not settings.demo_mode and not settings.d365_application_path:
+        if not settings.demo_mode and settings.d365_contract_mode == "legacy" and not settings.d365_application_path:
             if not requirement_id:
                 raise HTTPException(422, "A requirement_id is required to resolve this resume from ranked candidates")
             records = await app.state.adapter.get_top_candidates(requirement_id, 100)

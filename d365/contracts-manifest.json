@@ -1,6 +1,7 @@
 {
-  "format_version": 1,
-  "description": "Pasteable X++ JSON DTOs, matched to backend/app/services/d365.py. These are source text, not an importable model package.",
+  "format_version": 2,
+  "description": "Lean X++ service DTOs for the existing screenshot tables. No new tables, EDTs, enums or columns are required. Technical portal metadata is stored in backend SQLite.",
+  "model": "UBHR_Nive",
   "service_class": "UBHRPortalService",
   "aot_service": "UBHRPortalService",
   "service_group": "UBHRPortalServiceGroup",
@@ -14,72 +15,16 @@
     },
     "submitApplication": {
       "backend_operation": "submit_application",
-      "request": "UBHRPortalRequestContract",
+      "request": "UBHRPortalApplicationRequestContract",
       "response": "UBHRPortalResultContract"
     },
     "saveCandidateEvaluation": {
       "backend_operation": "save_candidate_evaluation",
-      "request": "UBHRPortalRequestContract",
+      "request": "UBHRPortalEvaluationRequestContract",
       "response": "UBHRPortalResultContract"
-    },
-    "getTopCandidates": {
-      "backend_operation": "get_top_candidates",
-      "request": "UBHRPortalRequestContract",
-      "response": "UBHRPortalCandidatesContract",
-      "response_array": "Candidates"
-    },
-    "getMyApplications": {
-      "backend_operation": "get_my_applications",
-      "request": "UBHRPortalRequestContract",
-      "response": "UBHRPortalApplicationsContract",
-      "response_array": "Applications"
-    },
-    "getApplication": {
-      "backend_operation": "get_application",
-      "request": "UBHRPortalRequestContract",
-      "response": "UBHRPortalApplicationContract"
     }
   },
   "contracts": {
-    "UBHRPortalRequestContract": {
-      "source": "d365/xpp/UBHRPortalRequestContract.xpp",
-      "members": {
-        "Company": "str",
-        "RequirementId": "str",
-        "ApplicationId": "str",
-        "CandidateId": "str",
-        "LinkedInIssuer": "str",
-        "LinkedInSub": "str",
-        "LinkedInProfileJson": "str",
-        "FullName": "str",
-        "Email": "str",
-        "Phone": "str",
-        "LinkedInUrl": "str",
-        "ResumeFileName": "str",
-        "ResumeBlobKey": "str",
-        "ResumeSha256": "str",
-        "JDHash": "str",
-        "ConsentAccepted": "boolean",
-        "ConsentVersion": "str",
-        "ConsentDateTime": "str",
-        "IdempotencyKey": "str",
-        "Limit": "int",
-        "Score": "int",
-        "MeetsMinimumCriteria": "boolean",
-        "MatchLabel": "str",
-        "ScoreJustification": "str",
-        "Summary": "str",
-        "MatchedSkillsJson": "str",
-        "PartiallyMatchedJson": "str",
-        "MissingSkillsJson": "str",
-        "EvidenceJson": "str",
-        "EvaluationConfidence": "str",
-        "ModelDeployment": "str",
-        "PromptVersion": "str",
-        "RubricVersion": "str",
-        "EvaluatedDateTime": "str"
-      }
-    },
     "UBHRPortalRequirementContract": {
       "source": "d365/xpp/UBHRPortalRequirementContract.xpp",
       "members": {
@@ -98,52 +43,42 @@
         "MinimumExperienceYears": "real",
         "MaximumExperienceYears": "real",
         "NumberOfOpenings": "int",
-        "JobStatus": "str",
-        "PublishedDateTime": "str",
-        "ClosingDateTime": "str",
+        "RequirementStatus": "str",
+        "OpenDate": "str",
+        "CloseDate": "str",
         "EvaluationCriteriaJson": "str",
         "RubricVersion": "str"
       }
     },
-    "UBHRPortalApplicationContract": {
-      "source": "d365/xpp/UBHRPortalApplicationContract.xpp",
+    "UBHRPortalApplicationRequestContract": {
+      "source": "d365/xpp/UBHRPortalApplicationRequestContract.xpp",
       "members": {
+        "Company": "str",
         "ApplicationId": "str",
-        "CandidateId": "str",
         "RequirementId": "str",
-        "JobTitle": "str",
-        "FullName": "str",
+        "FirstName": "str",
+        "LastName": "str",
         "Email": "str",
         "Phone": "str",
-        "LinkedInUrl": "str",
-        "LinkedInProfileJson": "str",
-        "AppliedDateTime": "str",
-        "HRStatus": "str",
-        "AIStatus": "str",
-        "ResumeFileName": "str",
-        "ResumeBlobKey": "str",
+        "LinkedInProfileUrl": "str",
         "LinkedInIssuer": "str",
-        "LinkedInSub": "str",
-        "EvaluatedDateTime": "str",
-        "Evaluation": "UBHRPortalEvaluationContract"
+        "LinkedInSub": "str"
       }
     },
-    "UBHRPortalEvaluationContract": {
-      "source": "d365/xpp/UBHRPortalEvaluationContract.xpp",
+    "UBHRPortalEvaluationRequestContract": {
+      "source": "d365/xpp/UBHRPortalEvaluationRequestContract.xpp",
       "members": {
+        "Company": "str",
+        "EvaluationId": "str",
+        "ApplicationId": "str",
+        "RequirementId": "str",
         "Score": "int",
         "MeetsMinimumCriteria": "boolean",
         "MatchLabel": "str",
-        "ScoreJustification": "str",
         "Summary": "str",
         "MatchedSkillsJson": "str",
-        "PartiallyMatchedJson": "str",
         "MissingSkillsJson": "str",
-        "EvidenceJson": "str",
-        "EvaluationConfidence": "str",
-        "ModelDeployment": "str",
-        "PromptVersion": "str",
-        "RubricVersion": "str"
+        "EvidenceJson": "str"
       }
     },
     "UBHRPortalResultContract": {
@@ -161,35 +96,47 @@
       "members": {
         "Requirements": "List<UBHRPortalRequirementContract>"
       }
-    },
-    "UBHRPortalCandidatesContract": {
-      "source": "d365/xpp/UBHRPortalCandidatesContract.xpp",
-      "members": {
-        "Candidates": "List<UBHRPortalApplicationContract>"
-      }
-    },
-    "UBHRPortalApplicationsContract": {
-      "source": "d365/xpp/UBHRPortalApplicationsContract.xpp",
-      "members": {
-        "Applications": "List<UBHRPortalApplicationContract>"
-      }
     }
   },
   "json_memo_defaults": {
     "MatchedSkillsJson": "[]",
-    "PartiallyMatchedJson": "[]",
     "MissingSkillsJson": "[]",
     "EvidenceJson": "[]",
-    "EvaluationCriteriaJson": "{}",
-    "LinkedInProfileJson": "{}"
+    "EvaluationCriteriaJson": "{}"
   },
+  "existing_table_sources": {
+    "requirements": "UBJobRequirementTable",
+    "candidates": "UBCandidateTable",
+    "applications": "UBJobApplicationTable",
+    "evaluations": "UBHRMatchEvaluationTable"
+  },
+  "sqlite_only_metadata": [
+    "portal creation and submission timestamps",
+    "resume filename and private blob reference",
+    "resume SHA-256 digest",
+    "JD snapshot and SHA-256 digest",
+    "LinkedIn public profile JSON",
+    "consent acceptance, version and timestamp",
+    "submission idempotency and payload digest",
+    "AI processing state and errors",
+    "score justification and partly matched evidence",
+    "evaluation confidence",
+    "model deployment, prompt version and rubric version",
+    "evaluation timestamp",
+    "complete evaluation JSON"
+  ],
   "notes": [
-    "All DateTime members serialize as ISO 8601 UTC strings; DTOs intentionally do not use UtcDateTime wire serialization.",
-    "ConsentAccepted, MeetsMinimumCriteria and Success are boolean members, not X++ NoYes enums on the wire.",
-    "A pending application has Evaluation=null; do not construct an empty evaluation that invents Score=0.",
-    "Lists use DataCollectionAttribute and AifCollectionTypeAttribute for explicit row typing.",
-    "MatchedSkillsJson, PartiallyMatchedJson, MissingSkillsJson and EvidenceJson contain JSON arrays as strings; the Python adapter normalizes their nested PascalCase members.",
-    "LinkedInProfileJson retains original allowlisted OIDC keys, not the PascalCase evidence convention.",
-    "Build and database synchronization must be performed in an F&O development environment; no X++ compiler is present in this repository."
+    "The only F&O operations are getOpenRequirements, submitApplication and saveCandidateEvaluation. Application history and ranking are read from SQLite.",
+    "Every business DataMember name is an existing screenshot field name. Company is company context; Success and Message are write acknowledgements, not table columns.",
+    "OpenDate and CloseDate are job eligibility dates and serialize as ISO YYYY-MM-DD text; they are not portal audit timestamps.",
+    "EvaluationCriteriaJson and RubricVersion are existing job business criteria and are read from UBJobRequirementTable. Per-run evaluation provenance remains in SQLite.",
+    "Company must equal the integration user current legal entity. getOpenRequirements is parameterless and reads that same legal entity.",
+    "The backend generates stable ApplicationId and EvaluationId before retryable writes; F&O must preserve those exact identifiers.",
+    "The request carries FirstName and LastName separately. LinkedInProfileUrl uses the actual UBCandidateTable field name.",
+    "MeetsMinimumCriteria and Success are JSON booleans, independent of table enum storage.",
+    "MatchedSkillsJson, MissingSkillsJson and EvidenceJson are JSON-array strings; they are not nested DTO arrays.",
+    "The full job description and resume comparison evidence must not be truncated by EDT lengths.",
+    "List attributes explicitly name both the accessor parameter and return type.",
+    "These files are pasteable source, not an importable or compiled model package. Build and verify against the actual field types in an F&O development environment."
   ]
 }

@@ -16,9 +16,9 @@
       "MinimumExperienceYears": 3.0,
       "MaximumExperienceYears": 7.0,
       "NumberOfOpenings": 2,
-      "JobStatus": "Open",
-      "PublishedDateTime": "2026-10-14T09:00:00Z",
-      "ClosingDateTime": "2026-12-31T23:59:59Z",
+      "RequirementStatus": "Open",
+      "OpenDate": "2026-10-01",
+      "CloseDate": "2026-11-01",
       "EvaluationCriteriaJson": "{}",
       "RubricVersion": "v1"
     }

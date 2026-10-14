@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "UBHR Recruitment Portal - D365 F&O contract examples",
-    "description": "Six JSON custom-service operations for UBHRPortalServiceGroup/UBHRPortalService. Import into Postman and configure variables locally. All sample identity, contact, document and AI values are fictional. An access token is intentionally not included; acquire an Entra client-credentials token locally using scope <F&O resource URL>/.default, then store it only as a local/sensitive accessToken variable. Do not export tokens or client secrets. getOpenRequirements uses the integration user's default company, which must match company. Run submitApplication before evaluation/read requests; its test stores the returned ApplicationId. The example blob reference must be replaced with a real private object before testing download or the complete portal workflow. These are contract fixtures, not evidence of an executed live F&O request.",
+    "name": "UBHR Recruitment Portal - existing-table lean D365 service",
+    "description": "Three POST custom-service operations on the existing UBHR_Nive model tables. All examples are fictional. Configure an F&O development environment and an Entra resource token locally. ApplicationId is generated and frozen by the backend SQLite record before submission; D365 must preserve it. EvaluationId is EVA- plus the same GUID. This collection verifies only core F&O persistence, not SQLite history, resume upload or a real AI review. No resume references, hashes, consent, profile JSON or model audit metadata are sent to D365. Use the React portal with real uploads to test the complete workflow. Never export a token or client secret.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -37,6 +37,16 @@
     },
     {
       "key": "applicationId",
+      "value": "APP-00000000-0000-0000-0000-000000000001",
+      "type": "string"
+    },
+    {
+      "key": "evaluationId",
+      "value": "EVA-00000000-0000-0000-0000-000000000001",
+      "type": "string"
+    },
+    {
+      "key": "candidateId",
       "value": "",
       "type": "string"
     },
@@ -48,26 +58,6 @@
     {
       "key": "linkedinSubject",
       "value": "fictional-member-001",
-      "type": "string"
-    },
-    {
-      "key": "submitIdempotencyKey",
-      "value": "1b44d090199636845d4cb2af6248bf4918a9da7677de235f2feab4e19a938db7",
-      "type": "string"
-    },
-    {
-      "key": "resumeBlobKey",
-      "value": "azure:0123456789abcdef0123456789abcdef.pdf",
-      "type": "string"
-    },
-    {
-      "key": "resumeSha256",
-      "value": "755e69d57688ec04927a174b2447d554a7f3b381e3497afea8797fd20223806e",
-      "type": "string"
-    },
-    {
-      "key": "jdHash",
-      "value": "70f0747e5522fabe6f19184c3399040265fd7c8583c1d9f7f92d659048f6bfbe",
       "type": "string"
     }
   ],
@@ -92,7 +82,7 @@
           }
         },
         "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/getOpenRequirements",
-        "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
+        "description": "Fictional core-persistence contract test against the existing tables. Technical metadata is maintained by the backend in SQLite; this direct request does not create a SQLite row or upload a resume."
       },
       "event": [
         {
@@ -103,14 +93,15 @@
               "pm.test('HTTP request succeeded', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
               "let result = pm.response.json();",
               "if (typeof result === 'string') { result = JSON.parse(result); }",
-              "pm.test('Requirements array returned', function () { pm.expect(result.Requirements).to.be.an('array'); });"
+              "pm.test('Requirements array returned', function () { pm.expect(result.Requirements).to.be.an('array'); });",
+              "pm.test('Rows have existing requirement fields', function () { result.Requirements.forEach(function (row) { pm.expect(row).to.have.property('RequirementId'); pm.expect(row).to.have.property('RequirementStatus'); pm.expect(row).to.have.property('JobDescription'); }); });"
             ]
           }
         }
       ],
       "response": [
         {
-          "name": "Fictional successful contract example",
+          "name": "Fictional successful core-persistence example",
           "originalRequest": {
             "method": "POST",
             "header": [
@@ -129,7 +120,7 @@
               }
             },
             "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/getOpenRequirements",
-            "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
+            "description": "Fictional core-persistence contract test against the existing tables. Technical metadata is maintained by the backend in SQLite; this direct request does not create a SQLite row or upload a resume."
           },
           "status": "OK",
           "code": 200,
@@ -141,7 +132,7 @@
             }
           ],
           "cookie": [],
-          "body": "{\n  \"Requirements\": [\n    {\n      \"RequirementId\": \"REQ-2026-001\",\n      \"JobTitle\": \"Senior Frontend Engineer\",\n      \"JobDescription\": \"Build and maintain accessible React and TypeScript web applications for a customer support portal. Translate product designs into reusable components, integrate REST APIs, and maintain automated tests. Work with design and backend teams to improve usability and performance. Candidates should have at least 3 years of relevant frontend experience; the advertised range is 3 to 7 years. Demonstrated React and TypeScript project work is required. Accessibility testing, Git, and API integration are required. Azure DevOps delivery experience is preferred. A related degree or equivalent relevant professional experience is accepted.\",\n      \"Responsibilities\": \"Implement reusable frontend components; integrate REST APIs; write automated tests; review pull requests; improve accessibility and performance.\",\n      \"RequiredSkills\": \"React, TypeScript, REST API integration, Git, Accessibility testing\",\n      \"PreferredSkills\": \"Azure DevOps, Playwright\",\n      \"RequiredQualifications\": \"Related degree or equivalent relevant professional experience.\",\n      \"RequiredCertifications\": \"\",\n      \"Department\": \"Engineering\",\n      \"JobLocation\": \"Bengaluru, India\",\n      \"WorkMode\": \"Hybrid\",\n      \"EmploymentType\": \"FullTime\",\n      \"MinimumExperienceYears\": 3.0,\n      \"MaximumExperienceYears\": 7.0,\n      \"NumberOfOpenings\": 2,\n      \"JobStatus\": \"Open\",\n      \"PublishedDateTime\": \"2026-10-14T09:00:00Z\",\n      \"ClosingDateTime\": \"2026-12-31T23:59:59Z\",\n      \"EvaluationCriteriaJson\": \"{}\",\n      \"RubricVersion\": \"v1\"\n    }\n  ]\n}"
+          "body": "{\n  \"Requirements\": [\n    {\n      \"RequirementId\": \"REQ-2026-001\",\n      \"JobTitle\": \"Senior Frontend Engineer\",\n      \"JobDescription\": \"Build and maintain accessible React and TypeScript web applications for a customer support portal. Translate product designs into reusable components, integrate REST APIs, and maintain automated tests. Work with design and backend teams to improve usability and performance. Candidates should have at least 3 years of relevant frontend experience; the advertised range is 3 to 7 years. Demonstrated React and TypeScript project work is required. Accessibility testing, Git, and API integration are required. Azure DevOps delivery experience is preferred. A related degree or equivalent relevant professional experience is accepted.\",\n      \"Responsibilities\": \"Implement reusable frontend components; integrate REST APIs; write automated tests; review pull requests; improve accessibility and performance.\",\n      \"RequiredSkills\": \"React, TypeScript, REST API integration, Git, Accessibility testing\",\n      \"PreferredSkills\": \"Azure DevOps, Playwright\",\n      \"RequiredQualifications\": \"Related degree or equivalent relevant professional experience.\",\n      \"RequiredCertifications\": \"\",\n      \"Department\": \"Engineering\",\n      \"JobLocation\": \"Bengaluru, India\",\n      \"WorkMode\": \"Hybrid\",\n      \"EmploymentType\": \"FullTime\",\n      \"MinimumExperienceYears\": 3.0,\n      \"MaximumExperienceYears\": 7.0,\n      \"NumberOfOpenings\": 2,\n      \"RequirementStatus\": \"Open\",\n      \"OpenDate\": \"2026-10-01\",\n      \"CloseDate\": \"2026-11-01\",\n      \"EvaluationCriteriaJson\": \"{}\",\n      \"RubricVersion\": \"v1\"\n    }\n  ]\n}"
         }
       ]
     },
@@ -157,7 +148,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"LinkedInIssuer\": \"{{linkedinIssuer}}\",\n    \"LinkedInSub\": \"{{linkedinSubject}}\",\n    \"LinkedInProfileJson\": \"{\\\"sub\\\":\\\"{{linkedinSubject}}\\\",\\\"issuer\\\":\\\"{{linkedinIssuer}}\\\",\\\"name\\\":\\\"Alex Example\\\",\\\"given_name\\\":\\\"Alex\\\",\\\"family_name\\\":\\\"Example\\\",\\\"picture\\\":\\\"https://example.invalid/fictional-avatar.png\\\",\\\"locale\\\":\\\"en_US\\\",\\\"email\\\":\\\"alex.example@example.com\\\",\\\"email_verified\\\":true}\",\n    \"FullName\": \"Alex Example\",\n    \"Email\": \"alex.example@example.com\",\n    \"Phone\": \"+91 90000 00000\",\n    \"LinkedInUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n    \"ResumeFileName\": \"alex-example-resume.pdf\",\n    \"ResumeBlobKey\": \"{{resumeBlobKey}}\",\n    \"ResumeSha256\": \"{{resumeSha256}}\",\n    \"JDHash\": \"{{jdHash}}\",\n    \"ConsentAccepted\": true,\n    \"ConsentVersion\": \"v1\",\n    \"ConsentDateTime\": \"2026-10-14T09:00:30Z\",\n    \"IdempotencyKey\": \"{{submitIdempotencyKey}}\"\n  }\n}",
+          "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"ApplicationId\": \"{{applicationId}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"FirstName\": \"Alex\",\n    \"LastName\": \"Example\",\n    \"Email\": \"alex.example@example.com\",\n    \"Phone\": \"+91 90000 00000\",\n    \"LinkedInProfileUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n    \"LinkedInIssuer\": \"{{linkedinIssuer}}\",\n    \"LinkedInSub\": \"{{linkedinSubject}}\"\n  }\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -165,9 +156,19 @@
           }
         },
         "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/submitApplication",
-        "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
+        "description": "Fictional core-persistence contract test against the existing tables. Technical metadata is maintained by the backend in SQLite; this direct request does not create a SQLite row or upload a resume."
       },
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const appId = pm.collectionVariables.get('applicationId');",
+              "if (!/^APP-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(appId || '')) { throw new Error('Set a stable APP-<GUID> applicationId before submission.'); }"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -176,16 +177,17 @@
               "pm.test('HTTP request succeeded', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
               "let result = pm.response.json();",
               "if (typeof result === 'string') { result = JSON.parse(result); }",
-              "pm.test('Service confirmed persistence', function () { pm.expect(result.Success).to.eql(true); });",
-              "pm.test('Stable application ID was returned', function () { pm.expect(result.ApplicationId).to.be.a('string').and.not.empty; });",
-              "if (result.Success === true && typeof result.ApplicationId === 'string' && result.ApplicationId.length > 0) { pm.collectionVariables.set('applicationId', result.ApplicationId); }"
+              "pm.test('Write acknowledged', function () { pm.expect(result.Success).to.equal(true); });",
+              "pm.test('Frozen application identifier preserved', function () { pm.expect(result.ApplicationId).to.equal(pm.collectionVariables.get('applicationId')); });",
+              "pm.test('Candidate identifier returned', function () { pm.expect(result.CandidateId).to.be.a('string').and.not.empty; });",
+              "if (result.Success === true && result.ApplicationId === pm.collectionVariables.get('applicationId') && typeof result.CandidateId === 'string' && result.CandidateId) { pm.collectionVariables.set('candidateId', result.CandidateId); }"
             ]
           }
         }
       ],
       "response": [
         {
-          "name": "Fictional successful contract example",
+          "name": "Fictional successful core-persistence example",
           "originalRequest": {
             "method": "POST",
             "header": [
@@ -196,7 +198,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"LinkedInIssuer\": \"{{linkedinIssuer}}\",\n    \"LinkedInSub\": \"{{linkedinSubject}}\",\n    \"LinkedInProfileJson\": \"{\\\"sub\\\":\\\"{{linkedinSubject}}\\\",\\\"issuer\\\":\\\"{{linkedinIssuer}}\\\",\\\"name\\\":\\\"Alex Example\\\",\\\"given_name\\\":\\\"Alex\\\",\\\"family_name\\\":\\\"Example\\\",\\\"picture\\\":\\\"https://example.invalid/fictional-avatar.png\\\",\\\"locale\\\":\\\"en_US\\\",\\\"email\\\":\\\"alex.example@example.com\\\",\\\"email_verified\\\":true}\",\n    \"FullName\": \"Alex Example\",\n    \"Email\": \"alex.example@example.com\",\n    \"Phone\": \"+91 90000 00000\",\n    \"LinkedInUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n    \"ResumeFileName\": \"alex-example-resume.pdf\",\n    \"ResumeBlobKey\": \"{{resumeBlobKey}}\",\n    \"ResumeSha256\": \"{{resumeSha256}}\",\n    \"JDHash\": \"{{jdHash}}\",\n    \"ConsentAccepted\": true,\n    \"ConsentVersion\": \"v1\",\n    \"ConsentDateTime\": \"2026-10-14T09:00:30Z\",\n    \"IdempotencyKey\": \"{{submitIdempotencyKey}}\"\n  }\n}",
+              "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"ApplicationId\": \"{{applicationId}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"FirstName\": \"Alex\",\n    \"LastName\": \"Example\",\n    \"Email\": \"alex.example@example.com\",\n    \"Phone\": \"+91 90000 00000\",\n    \"LinkedInProfileUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n    \"LinkedInIssuer\": \"{{linkedinIssuer}}\",\n    \"LinkedInSub\": \"{{linkedinSubject}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -204,7 +206,7 @@
               }
             },
             "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/submitApplication",
-            "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
+            "description": "Fictional core-persistence contract test against the existing tables. Technical metadata is maintained by the backend in SQLite; this direct request does not create a SQLite row or upload a resume."
           },
           "status": "OK",
           "code": 200,
@@ -232,7 +234,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"ApplicationId\": \"{{applicationId}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"IdempotencyKey\": \"evaluation:{{applicationId}}\",\n    \"Score\": 73,\n    \"MeetsMinimumCriteria\": true,\n    \"MatchLabel\": \"PartialEvidence\",\n    \"ScoreJustification\": \"Illustrative assessment: React and TypeScript delivery and relevant experience support the core requirement. Accessibility testing is partially evidenced and Azure DevOps delivery is not evidenced. Human review is required.\",\n    \"Summary\": \"Illustrative example only. Confirm the project evidence and accessibility testing depth in human review.\",\n    \"MatchedSkillsJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"}]\",\n    \"PartiallyMatchedJson\": \"[{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n    \"MissingSkillsJson\": \"[{\\\"Requirement\\\":\\\"Azure DevOps delivery experience\\\",\\\"Reason\\\":\\\"No Azure DevOps delivery example is present in the illustrative resume.\\\"}]\",\n    \"EvidenceJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"},{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n    \"EvaluationConfidence\": \"Medium\",\n    \"ModelDeployment\": \"gpt-4.1-mini\",\n    \"PromptVersion\": \"v1\",\n    \"RubricVersion\": \"v1\",\n    \"EvaluatedDateTime\": \"2026-10-14T09:02:00Z\"\n  }\n}",
+          "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"EvaluationId\": \"{{evaluationId}}\",\n    \"ApplicationId\": \"{{applicationId}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"Score\": 73,\n    \"MeetsMinimumCriteria\": true,\n    \"MatchLabel\": \"PartialEvidence\",\n    \"Summary\": \"Illustrative example only. React and TypeScript delivery are evidenced; confirm accessibility testing depth in human review. Azure DevOps experience is not evidenced.\",\n    \"MatchedSkillsJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"}]\",\n    \"MissingSkillsJson\": \"[{\\\"Requirement\\\":\\\"Azure DevOps delivery experience\\\",\\\"Reason\\\":\\\"No Azure DevOps delivery example is present in the illustrative resume.\\\"}]\",\n    \"EvidenceJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"},{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\"\n  }\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -240,9 +242,20 @@
           }
         },
         "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/saveCandidateEvaluation",
-        "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
+        "description": "Fictional core-persistence contract test against the existing tables. Technical metadata is maintained by the backend in SQLite; this direct request does not create a SQLite row or upload a resume."
       },
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const appId = pm.collectionVariables.get('applicationId');",
+              "if (!/^APP-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(appId || '')) { throw new Error('Set a stable APP-<GUID> applicationId before submission.'); }",
+              "if (pm.collectionVariables.get('evaluationId') !== 'EVA-' + appId.slice(4)) { throw new Error('evaluationId must be EVA- plus the same frozen application GUID.'); }"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -251,16 +264,18 @@
               "pm.test('HTTP request succeeded', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
               "let result = pm.response.json();",
               "if (typeof result === 'string') { result = JSON.parse(result); }",
-              "pm.test('Service confirmed persistence', function () { pm.expect(result.Success).to.eql(true); });",
-              "pm.test('Stable application ID was returned', function () { pm.expect(result.ApplicationId).to.be.a('string').and.not.empty; });",
-              "pm.test('Acknowledgement matches the selected application', function () { pm.expect(result.ApplicationId).to.eql(pm.variables.get('applicationId')); });"
+              "pm.test('Write acknowledged', function () { pm.expect(result.Success).to.equal(true); });",
+              "pm.test('Frozen application identifier preserved', function () { pm.expect(result.ApplicationId).to.equal(pm.collectionVariables.get('applicationId')); });",
+              "pm.test('Candidate identifier returned', function () { pm.expect(result.CandidateId).to.be.a('string').and.not.empty; });",
+              "pm.test('Stable evaluation identifier preserved', function () { pm.expect(result.EvaluationId).to.equal(pm.collectionVariables.get('evaluationId')); });",
+              "pm.test('Evaluation belongs to submitted candidate', function () { const candidateId = pm.collectionVariables.get('candidateId'); if (candidateId) { pm.expect(result.CandidateId).to.equal(candidateId); } });"
             ]
           }
         }
       ],
       "response": [
         {
-          "name": "Fictional successful contract example",
+          "name": "Fictional successful core-persistence example",
           "originalRequest": {
             "method": "POST",
             "header": [
@@ -271,7 +286,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"ApplicationId\": \"{{applicationId}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"IdempotencyKey\": \"evaluation:{{applicationId}}\",\n    \"Score\": 73,\n    \"MeetsMinimumCriteria\": true,\n    \"MatchLabel\": \"PartialEvidence\",\n    \"ScoreJustification\": \"Illustrative assessment: React and TypeScript delivery and relevant experience support the core requirement. Accessibility testing is partially evidenced and Azure DevOps delivery is not evidenced. Human review is required.\",\n    \"Summary\": \"Illustrative example only. Confirm the project evidence and accessibility testing depth in human review.\",\n    \"MatchedSkillsJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"}]\",\n    \"PartiallyMatchedJson\": \"[{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n    \"MissingSkillsJson\": \"[{\\\"Requirement\\\":\\\"Azure DevOps delivery experience\\\",\\\"Reason\\\":\\\"No Azure DevOps delivery example is present in the illustrative resume.\\\"}]\",\n    \"EvidenceJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"},{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n    \"EvaluationConfidence\": \"Medium\",\n    \"ModelDeployment\": \"gpt-4.1-mini\",\n    \"PromptVersion\": \"v1\",\n    \"RubricVersion\": \"v1\",\n    \"EvaluatedDateTime\": \"2026-10-14T09:02:00Z\"\n  }\n}",
+              "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"EvaluationId\": \"{{evaluationId}}\",\n    \"ApplicationId\": \"{{applicationId}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"Score\": 73,\n    \"MeetsMinimumCriteria\": true,\n    \"MatchLabel\": \"PartialEvidence\",\n    \"Summary\": \"Illustrative example only. React and TypeScript delivery are evidenced; confirm accessibility testing depth in human review. Azure DevOps experience is not evidenced.\",\n    \"MatchedSkillsJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"}]\",\n    \"MissingSkillsJson\": \"[{\\\"Requirement\\\":\\\"Azure DevOps delivery experience\\\",\\\"Reason\\\":\\\"No Azure DevOps delivery example is present in the illustrative resume.\\\"}]\",\n    \"EvidenceJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"},{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -279,7 +294,7 @@
               }
             },
             "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/saveCandidateEvaluation",
-            "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
+            "description": "Fictional core-persistence contract test against the existing tables. Technical metadata is maintained by the backend in SQLite; this direct request does not create a SQLite row or upload a resume."
           },
           "status": "OK",
           "code": 200,
@@ -292,225 +307,6 @@
           ],
           "cookie": [],
           "body": "{\n  \"Success\": true,\n  \"ApplicationId\": \"APP-00000000-0000-0000-0000-000000000001\",\n  \"CandidateId\": \"CAN-00000000-0000-0000-0000-000000000001\",\n  \"EvaluationId\": \"EVA-00000000-0000-0000-0000-000000000001\",\n  \"Message\": \"Evaluation saved.\"\n}"
-        }
-      ]
-    },
-    {
-      "name": "getTopCandidates",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"Limit\": 25\n  }\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/getTopCandidates",
-        "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
-      },
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('HTTP request succeeded', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
-              "let result = pm.response.json();",
-              "if (typeof result === 'string') { result = JSON.parse(result); }",
-              "pm.test('Candidates array returned', function () { pm.expect(result.Candidates).to.be.an('array'); });"
-            ]
-          }
-        }
-      ],
-      "response": [
-        {
-          "name": "Fictional successful contract example",
-          "originalRequest": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"RequirementId\": \"{{requirementId}}\",\n    \"Limit\": 25\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/getTopCandidates",
-            "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
-          },
-          "status": "OK",
-          "code": 200,
-          "_postman_previewlanguage": "json",
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "cookie": [],
-          "body": "{\n  \"Candidates\": [\n    {\n      \"ApplicationId\": \"APP-00000000-0000-0000-0000-000000000001\",\n      \"CandidateId\": \"CAN-00000000-0000-0000-0000-000000000001\",\n      \"RequirementId\": \"REQ-2026-001\",\n      \"JobTitle\": \"Senior Frontend Engineer\",\n      \"FullName\": \"Alex Example\",\n      \"Email\": \"alex.example@example.com\",\n      \"Phone\": \"+91 90000 00000\",\n      \"LinkedInUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n      \"LinkedInProfileJson\": \"{\\\"sub\\\":\\\"fictional-member-001\\\",\\\"issuer\\\":\\\"https://www.linkedin.com\\\",\\\"name\\\":\\\"Alex Example\\\",\\\"given_name\\\":\\\"Alex\\\",\\\"family_name\\\":\\\"Example\\\",\\\"picture\\\":\\\"https://example.invalid/fictional-avatar.png\\\",\\\"locale\\\":\\\"en_US\\\",\\\"email\\\":\\\"alex.example@example.com\\\",\\\"email_verified\\\":true}\",\n      \"AppliedDateTime\": \"2026-10-14T09:01:00Z\",\n      \"HRStatus\": \"Submitted\",\n      \"AIStatus\": \"Completed\",\n      \"ResumeFileName\": \"alex-example-resume.pdf\",\n      \"ResumeBlobKey\": \"azure:0123456789abcdef0123456789abcdef.pdf\",\n      \"LinkedInIssuer\": \"https://www.linkedin.com\",\n      \"LinkedInSub\": \"fictional-member-001\",\n      \"EvaluatedDateTime\": \"2026-10-14T09:02:00Z\",\n      \"Evaluation\": {\n        \"Score\": 73,\n        \"MeetsMinimumCriteria\": true,\n        \"MatchLabel\": \"PartialEvidence\",\n        \"ScoreJustification\": \"Illustrative assessment: React and TypeScript delivery and relevant experience support the core requirement. Accessibility testing is partially evidenced and Azure DevOps delivery is not evidenced. Human review is required.\",\n        \"Summary\": \"Illustrative example only. Confirm the project evidence and accessibility testing depth in human review.\",\n        \"MatchedSkillsJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"}]\",\n        \"PartiallyMatchedJson\": \"[{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n        \"MissingSkillsJson\": \"[{\\\"Requirement\\\":\\\"Azure DevOps delivery experience\\\",\\\"Reason\\\":\\\"No Azure DevOps delivery example is present in the illustrative resume.\\\"}]\",\n        \"EvidenceJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"},{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n        \"EvaluationConfidence\": \"Medium\",\n        \"ModelDeployment\": \"gpt-4.1-mini\",\n        \"PromptVersion\": \"v1\",\n        \"RubricVersion\": \"v1\"\n      }\n    },\n    {\n      \"ApplicationId\": \"APP-00000000-0000-0000-0000-000000000002\",\n      \"CandidateId\": \"CAN-00000000-0000-0000-0000-000000000001\",\n      \"RequirementId\": \"REQ-2026-001\",\n      \"JobTitle\": \"Senior Frontend Engineer\",\n      \"FullName\": \"Alex Example\",\n      \"Email\": \"alex.example@example.com\",\n      \"Phone\": \"+91 90000 00000\",\n      \"LinkedInUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n      \"LinkedInProfileJson\": \"{\\\"sub\\\":\\\"fictional-member-001\\\",\\\"issuer\\\":\\\"https://www.linkedin.com\\\",\\\"name\\\":\\\"Alex Example\\\",\\\"given_name\\\":\\\"Alex\\\",\\\"family_name\\\":\\\"Example\\\",\\\"picture\\\":\\\"https://example.invalid/fictional-avatar.png\\\",\\\"locale\\\":\\\"en_US\\\",\\\"email\\\":\\\"alex.example@example.com\\\",\\\"email_verified\\\":true}\",\n      \"AppliedDateTime\": \"2026-10-14T09:03:00Z\",\n      \"HRStatus\": \"Submitted\",\n      \"AIStatus\": \"Pending\",\n      \"ResumeFileName\": \"alex-example-revised-resume.pdf\",\n      \"ResumeBlobKey\": \"azure:fedcba9876543210fedcba9876543210.pdf\",\n      \"LinkedInIssuer\": \"https://www.linkedin.com\",\n      \"LinkedInSub\": \"fictional-member-001\",\n      \"EvaluatedDateTime\": \"\",\n      \"Evaluation\": null\n    }\n  ]\n}"
-        }
-      ]
-    },
-    {
-      "name": "getMyApplications",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"LinkedInIssuer\": \"{{linkedinIssuer}}\",\n    \"LinkedInSub\": \"{{linkedinSubject}}\"\n  }\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/getMyApplications",
-        "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
-      },
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('HTTP request succeeded', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
-              "let result = pm.response.json();",
-              "if (typeof result === 'string') { result = JSON.parse(result); }",
-              "pm.test('Applications array returned', function () { pm.expect(result.Applications).to.be.an('array'); });"
-            ]
-          }
-        }
-      ],
-      "response": [
-        {
-          "name": "Fictional successful contract example",
-          "originalRequest": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"LinkedInIssuer\": \"{{linkedinIssuer}}\",\n    \"LinkedInSub\": \"{{linkedinSubject}}\"\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/getMyApplications",
-            "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
-          },
-          "status": "OK",
-          "code": 200,
-          "_postman_previewlanguage": "json",
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "cookie": [],
-          "body": "{\n  \"Applications\": [\n    {\n      \"ApplicationId\": \"APP-00000000-0000-0000-0000-000000000002\",\n      \"CandidateId\": \"CAN-00000000-0000-0000-0000-000000000001\",\n      \"RequirementId\": \"REQ-2026-001\",\n      \"JobTitle\": \"Senior Frontend Engineer\",\n      \"FullName\": \"Alex Example\",\n      \"Email\": \"alex.example@example.com\",\n      \"Phone\": \"+91 90000 00000\",\n      \"LinkedInUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n      \"LinkedInProfileJson\": \"{\\\"sub\\\":\\\"fictional-member-001\\\",\\\"issuer\\\":\\\"https://www.linkedin.com\\\",\\\"name\\\":\\\"Alex Example\\\",\\\"given_name\\\":\\\"Alex\\\",\\\"family_name\\\":\\\"Example\\\",\\\"picture\\\":\\\"https://example.invalid/fictional-avatar.png\\\",\\\"locale\\\":\\\"en_US\\\",\\\"email\\\":\\\"alex.example@example.com\\\",\\\"email_verified\\\":true}\",\n      \"AppliedDateTime\": \"2026-10-14T09:03:00Z\",\n      \"HRStatus\": \"Submitted\",\n      \"AIStatus\": \"Pending\",\n      \"ResumeFileName\": \"alex-example-revised-resume.pdf\",\n      \"ResumeBlobKey\": \"azure:fedcba9876543210fedcba9876543210.pdf\",\n      \"LinkedInIssuer\": \"https://www.linkedin.com\",\n      \"LinkedInSub\": \"fictional-member-001\",\n      \"EvaluatedDateTime\": \"\",\n      \"Evaluation\": null\n    },\n    {\n      \"ApplicationId\": \"APP-00000000-0000-0000-0000-000000000001\",\n      \"CandidateId\": \"CAN-00000000-0000-0000-0000-000000000001\",\n      \"RequirementId\": \"REQ-2026-001\",\n      \"JobTitle\": \"Senior Frontend Engineer\",\n      \"FullName\": \"Alex Example\",\n      \"Email\": \"alex.example@example.com\",\n      \"Phone\": \"+91 90000 00000\",\n      \"LinkedInUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n      \"LinkedInProfileJson\": \"{\\\"sub\\\":\\\"fictional-member-001\\\",\\\"issuer\\\":\\\"https://www.linkedin.com\\\",\\\"name\\\":\\\"Alex Example\\\",\\\"given_name\\\":\\\"Alex\\\",\\\"family_name\\\":\\\"Example\\\",\\\"picture\\\":\\\"https://example.invalid/fictional-avatar.png\\\",\\\"locale\\\":\\\"en_US\\\",\\\"email\\\":\\\"alex.example@example.com\\\",\\\"email_verified\\\":true}\",\n      \"AppliedDateTime\": \"2026-10-14T09:01:00Z\",\n      \"HRStatus\": \"Submitted\",\n      \"AIStatus\": \"Completed\",\n      \"ResumeFileName\": \"alex-example-resume.pdf\",\n      \"ResumeBlobKey\": \"azure:0123456789abcdef0123456789abcdef.pdf\",\n      \"LinkedInIssuer\": \"https://www.linkedin.com\",\n      \"LinkedInSub\": \"fictional-member-001\",\n      \"EvaluatedDateTime\": \"2026-10-14T09:02:00Z\",\n      \"Evaluation\": {\n        \"Score\": 73,\n        \"MeetsMinimumCriteria\": true,\n        \"MatchLabel\": \"PartialEvidence\",\n        \"ScoreJustification\": \"Illustrative assessment: React and TypeScript delivery and relevant experience support the core requirement. Accessibility testing is partially evidenced and Azure DevOps delivery is not evidenced. Human review is required.\",\n        \"Summary\": \"Illustrative example only. Confirm the project evidence and accessibility testing depth in human review.\",\n        \"MatchedSkillsJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"}]\",\n        \"PartiallyMatchedJson\": \"[{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n        \"MissingSkillsJson\": \"[{\\\"Requirement\\\":\\\"Azure DevOps delivery experience\\\",\\\"Reason\\\":\\\"No Azure DevOps delivery example is present in the illustrative resume.\\\"}]\",\n        \"EvidenceJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"},{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n        \"EvaluationConfidence\": \"Medium\",\n        \"ModelDeployment\": \"gpt-4.1-mini\",\n        \"PromptVersion\": \"v1\",\n        \"RubricVersion\": \"v1\"\n      }\n    }\n  ]\n}"
-        }
-      ]
-    },
-    {
-      "name": "getApplication",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"ApplicationId\": \"{{applicationId}}\"\n  }\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        },
-        "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/getApplication",
-        "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
-      },
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('HTTP request succeeded', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
-              "let result = pm.response.json();",
-              "if (typeof result === 'string') { result = JSON.parse(result); }",
-              "pm.test('Requested application returned', function () { pm.expect(result.ApplicationId).to.eql(pm.variables.get('applicationId')); });"
-            ]
-          }
-        }
-      ],
-      "response": [
-        {
-          "name": "Fictional successful contract example",
-          "originalRequest": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"_request\": {\n    \"Company\": \"{{company}}\",\n    \"ApplicationId\": \"{{applicationId}}\"\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": "{{foBaseUrl}}/api/services/UBHRPortalServiceGroup/UBHRPortalService/getApplication",
-            "description": "Fictional contract example. Use an F&O development environment and configure collection variables locally. This request does not create or upload the private resume blob."
-          },
-          "status": "OK",
-          "code": 200,
-          "_postman_previewlanguage": "json",
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "cookie": [],
-          "body": "{\n  \"ApplicationId\": \"APP-00000000-0000-0000-0000-000000000001\",\n  \"CandidateId\": \"CAN-00000000-0000-0000-0000-000000000001\",\n  \"RequirementId\": \"REQ-2026-001\",\n  \"JobTitle\": \"Senior Frontend Engineer\",\n  \"FullName\": \"Alex Example\",\n  \"Email\": \"alex.example@example.com\",\n  \"Phone\": \"+91 90000 00000\",\n  \"LinkedInUrl\": \"https://www.linkedin.com/in/fictional-candidate-example/\",\n  \"LinkedInProfileJson\": \"{\\\"sub\\\":\\\"fictional-member-001\\\",\\\"issuer\\\":\\\"https://www.linkedin.com\\\",\\\"name\\\":\\\"Alex Example\\\",\\\"given_name\\\":\\\"Alex\\\",\\\"family_name\\\":\\\"Example\\\",\\\"picture\\\":\\\"https://example.invalid/fictional-avatar.png\\\",\\\"locale\\\":\\\"en_US\\\",\\\"email\\\":\\\"alex.example@example.com\\\",\\\"email_verified\\\":true}\",\n  \"AppliedDateTime\": \"2026-10-14T09:01:00Z\",\n  \"HRStatus\": \"Submitted\",\n  \"AIStatus\": \"Completed\",\n  \"ResumeFileName\": \"alex-example-resume.pdf\",\n  \"ResumeBlobKey\": \"azure:0123456789abcdef0123456789abcdef.pdf\",\n  \"LinkedInIssuer\": \"https://www.linkedin.com\",\n  \"LinkedInSub\": \"fictional-member-001\",\n  \"EvaluatedDateTime\": \"2026-10-14T09:02:00Z\",\n  \"Evaluation\": {\n    \"Score\": 73,\n    \"MeetsMinimumCriteria\": true,\n    \"MatchLabel\": \"PartialEvidence\",\n    \"ScoreJustification\": \"Illustrative assessment: React and TypeScript delivery and relevant experience support the core requirement. Accessibility testing is partially evidenced and Azure DevOps delivery is not evidenced. Human review is required.\",\n    \"Summary\": \"Illustrative example only. Confirm the project evidence and accessibility testing depth in human review.\",\n    \"MatchedSkillsJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"}]\",\n    \"PartiallyMatchedJson\": \"[{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n    \"MissingSkillsJson\": \"[{\\\"Requirement\\\":\\\"Azure DevOps delivery experience\\\",\\\"Reason\\\":\\\"No Azure DevOps delivery example is present in the illustrative resume.\\\"}]\",\n    \"EvidenceJson\": \"[{\\\"Requirement\\\":\\\"Demonstrated React and TypeScript project work\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Built React and TypeScript interfaces for a customer support portal.\\\",\\\"Reason\\\":\\\"The resume explicitly names both required technologies and the product delivered.\\\",\\\"EvidenceStrength\\\":\\\"High\\\"},{\\\"Requirement\\\":\\\"Accessibility testing\\\",\\\"ResumeSection\\\":\\\"Professional experience\\\",\\\"ProjectName\\\":\\\"Customer support portal\\\",\\\"Evidence\\\":\\\"Added keyboard navigation to shared interface components.\\\",\\\"Reason\\\":\\\"The example supports accessibility work, but does not describe systematic testing or an audit.\\\",\\\"EvidenceStrength\\\":\\\"Medium\\\"}]\",\n    \"EvaluationConfidence\": \"Medium\",\n    \"ModelDeployment\": \"gpt-4.1-mini\",\n    \"PromptVersion\": \"v1\",\n    \"RubricVersion\": \"v1\"\n  }\n}"
         }
       ]
     }

@@ -10,6 +10,12 @@ backend/.data/
 backend/.local/
 data/
 *.rdb
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Dependencies, build and test outputs
 node_modules/

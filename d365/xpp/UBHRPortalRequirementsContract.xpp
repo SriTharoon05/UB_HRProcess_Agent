@@ -1,6 +1,4 @@
-/// <summary>
-/// JSON array wrapper. Empty results serialize as an empty array.
-/// </summary>
+/// <summary>A typed array of public requirements; empty results are an empty array.</summary>
 [DataContractAttribute]
 public final class UBHRPortalRequirementsContract
 {

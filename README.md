@@ -2,7 +2,7 @@
 
 A recruitment portal with a candidate job board, private resume uploads, and an HR workspace for reviewing AI-generated evidence against each job description. The responsive violet dashboard follows the supplied UI reference.
 
-React communicates with FastAPI. D365 Finance & Operations remains the business system of record; Azure Blob Storage keeps documents private; a Redis-backed worker runs Azure OpenAI evaluations. Scores describe documented job/resume alignment. They do not automate hiring or rejection, and human review is required.
+React communicates with FastAPI. D365 Finance & Operations stores the existing jobs, candidate/application records and core AI result. SQLite stores portal metadata and the complete evaluation, Azure Blob Storage keeps documents private, and a Redis-backed worker runs Azure OpenAI evaluations. Scores describe documented job/resume alignment. They do not automate hiring or rejection, and human review is required.
 
 **The default development workflow is explicitly labeled demo mode.** It runs without external credentials, uses fictional jobs/candidates, and lets you upload a real PDF/DOCX and explore a labeled sample evaluation. Connected adapters are implemented separately; live LinkedIn, Entra, D365, Azure OpenAI, and Blob validation requires your configuration and deployed D365 contracts.
 
@@ -12,7 +12,7 @@ React communicates with FastAPI. D365 Finance & Operations remains the business 
 - Sign in as a demo candidate or use configured LinkedIn OIDC in connected mode.
 - Return from LinkedIn to the selected job, inspect the shared profile details, and confirm the remaining application contact information.
 - Upload a validated PDF/DOCX, accept consent, and submit an application with retry protection.
-- Review your own application status where the D365 read capability is configured.
+- Review acknowledged portal applications and AI processing status from SQLite; external F&O recruiter edits are not synchronized in this three-operation version.
 - Sign in to the separate HR workspace; inspect candidates for one job and review scores, explanations, and supporting resume evidence.
 - Access original resumes through an authorized backend operation.
 
@@ -24,6 +24,7 @@ React communicates with FastAPI. D365 Finance & Operations remains the business 
 | Backend | Python 3.11+, FastAPI, Pydantic v2, HTTPX, MSAL, Authlib, Uvicorn |
 | Evaluation | Azure OpenAI SDK, structured JSON validation, versioned evidence prompt |
 | Documents | PyMuPDF, python-docx, private Azure Blob Storage; local development adapter |
+| Portal metadata | SQLite for frozen application/JD snapshots, document references, consent and full evaluation/provenance |
 | Jobs and sessions | Redis-backed background processing and temporary/session state |
 | Quality | Pytest, Vitest, Testing Library, ESLint, TypeScript checks, CI |
 
@@ -33,12 +34,14 @@ flowchart LR
     React --> API[FastAPI]
     API --> OIDC[LinkedIn / Entra OIDC]
     API --> D365[D365 custom services\nBusiness records]
+    API --> SQLite[SQLite portal metadata]
     API --> Blob[Private resume storage]
     API --> Queue[Redis jobs / sessions]
     Queue --> Worker[Evaluation worker]
     Worker --> Blob
     Worker --> AI[Azure OpenAI\nComplete resume + job]
     Worker --> D365
+    Worker --> SQLite
 ```
 
 See [architecture and data ownership](docs/architecture.md) for the processing flow and [API contract](docs/api-contract.md) for frontend/backend interfaces.
@@ -112,7 +115,7 @@ cd backend
 uv run --frozen python -m app.worker
 ```
 
-The API and worker must use the same backend environment, Redis instance/prefix, and private storage configuration. Run Redis with persistence enabled; see [deployment](docs/deployment.md) for service isolation and recovery requirements. Demo evaluation does not require external model credentials or a connected worker.
+The API and worker must use the same backend environment, Redis instance/prefix, private storage configuration and durable SQLite file (`SQLITE_DATABASE_PATH`). Use one shared absolute local path/volume; do not run independent copies across hosts. Run Redis with persistence enabled; see [deployment](docs/deployment.md) for service isolation and recovery requirements. Demo evaluation does not require external model credentials or a connected worker.
 
 The repository also provides a [connected production Compose override](compose.production.yml) for use behind an HTTPS ingress; it requires live credentials/contracts and has not been validated against external services. Follow [deployment instructions](docs/deployment.md) before using it.
 
@@ -122,11 +125,10 @@ The complete variable reference is in [environment configuration](docs/environme
 
 | Integration | What is implemented | What you must configure/verify |
 | --- | --- | --- |
-| D365 requirements | Token client, typed normalization and X++ source for full open-job reads | F&O build/deployment, chosen requirement source and mapped-user permissions |
-| D365 submission | Candidate identity, private document metadata and atomic/idempotent X++ submission source | Database synchronization and live stable-ID/retry acceptance |
-| D365 evaluations | Structured mapping, save adapter and current-evaluation X++ upsert source | Deploy `saveCandidateEvaluation` and configure its verified path |
-| D365 rankings | Job-specific normalization and X++ ranked-read source | Deploy `getTopCandidates` and configure its verified path |
-| Candidate history/detail | Ownership checks and both X++ read operation sources | Deploy/configure `getMyApplications` and `getApplication`, then test ownership |
+| D365 requirements | Typed full-job read from existing `UBJobRequirementTable` | Build/deploy source, actual status symbols and integration-user company |
+| D365 submission | Stable application ID and atomic candidate/application write to existing screenshot tables | Existing unique indexes, EDT lengths, role permissions and live retry acceptance |
+| D365 evaluation | Three-operation core-result write to `UBHRMatchEvaluationTable` | Deploy `saveCandidateEvaluation` and configure its verified path |
+| Portal metadata/history/ranking | SQLite-backed frozen submissions, full evaluations and authorized reads | Shared durable local database, backups; existing F&O records/status edits are not imported |
 | LinkedIn | Backend OIDC authorization-code flow and session creation | Client credentials, enabled OIDC product, exact registered redirect URI |
 | HR authentication | Separate Entra OIDC flow and HR role authorization | Tenant/app registration, redirect URI, assigned application role |
 | Azure OpenAI | Complete-document evidence prompt, structured output validation, evidence checks | Endpoint/key/deployment/API-version compatibility and live model smoke test |
@@ -137,18 +139,13 @@ No live external integration is claimed verified without its configured credenti
 
 ## D365 deployment handoff
 
-The complete [Visual Studio setup guide](d365/README.md) now supplies four table specifications, 22 EDTs, three enums, eight X++ data contracts, `UBHRPortalService`, the service/group designer steps, security setup, a Postman collection and all six backend endpoint settings. Follow [TABLES.md](d365/TABLES.md) for exact columns, indexes and relations, then paste the classes from [d365/xpp](d365/xpp).
+The [Visual Studio paste guide](d365/README.md) uses your existing model `UBHR_Nive` and the exact tables `UBJobRequirementTable`, `UBCandidateTable`, `UBJobApplicationTable`, `UBHRMatchEvaluationTable`. It provides five contracts, `UBHRPortalService`, three service operations, `UBHRPortalServiceGroup`, a Postman collection and backend settings. No new D365 tables, fields, EDTs or enums are proposed. [TABLES.md](d365/TABLES.md) lists all screenshot fields and the smaller selected field set; paste classes from [d365/xpp](d365/xpp).
 
-The new implementation uses `UBHRPortalServiceGroup/UBHRPortalService` and preserves the reported existing `UBHRApplicationServiceGroup/UBHRApplicationService`. Choose the authoritative requirement table before deployment. The source pack is not a compiled/importable F&O package: build, database synchronization and live service/security verification must occur in your F&O development environment.
+With `D365_CONTRACT_MODE=sqlite`, only `getOpenRequirements`, `submitApplication` and `saveCandidateEvaluation` call F&O. SQLite keeps timestamps, document references/checksums, consent, validated LinkedIn profile, frozen JD/contact snapshots, retries and complete AI provenance/evidence. Existing F&O metadata fields are left unchanged. Actual resumes remain private blobs; Redis still queues connected work.
 
-The new endpoint example values deliberately remain empty:
+After building/deploying the service group, merge [d365/backend.env.example](d365/backend.env.example) into ignored `backend/.env`. D365 endpoints/credentials belong there; React continues calling FastAPI. X++ compilation, any required index/EDT synchronization, and live serializer/security acceptance must occur in your F&O development environment. The source folder is not a compiled model/package.
 
-```dotenv
-D365_SAVE_EVALUATION_PATH=
-D365_TOP_CANDIDATES_PATH=
-```
-
-After deploying the source pack, merge [d365/backend.env.example](d365/backend.env.example) into ignored `backend/.env`; D365 credentials/endpoints belong there, while React continues to call FastAPI. The [schema overview](docs/d365-schema.md) and [wire contracts](docs/d365-endpoints.md) explain persistence and mappings. Independent D365 Processing/Failed updates, HR status changes and deletion require additional contracts. Rankings provide a top-N limit, not a total population count or server-side pagination.
+History/detail/ranking include only acknowledged portal submissions. They do not synchronize external F&O recruiter status changes; the portal currently retains its initial human-review `Submitted` snapshot. HR status editing, cross-system deletion and multi-host database scaling need separately reviewed capabilities. The `legacy` adapter remains available for an explicitly configured older six-operation service; it is not the default source pack.
 
 ## Test and build
 

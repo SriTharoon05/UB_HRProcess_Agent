@@ -1,42 +1,33 @@
-# JSON contract examples
+# Three lean JSON service examples
 
-These files contain **fictional data**, not recorded LinkedIn, Azure OpenAI, Azure Blob, or D365 responses. Each of the six operations has a `.request.json` and `.response.json` file. The examples match the DTO names and DataMember types in [contracts-manifest.json](../contracts-manifest.json).
-
-All operations use HTTP **POST** and `Content-Type: application/json`. The service path is:
+These files contain **fictional data** for the existing `UBHR_Nive` tables: `UBJobRequirementTable`, `UBCandidateTable`, `UBJobApplicationTable` and `UBHRMatchEvaluationTable`. They match [contracts-manifest.json](../contracts-manifest.json) and require no new table columns. All three operations use HTTP **POST**, bearer authentication and `Content-Type: application/json`.
 
 ```text
 https://YOUR-ENVIRONMENT.operations.dynamics.com/api/services/UBHRPortalServiceGroup/UBHRPortalService/OPERATION
 ```
-
-`getOpenRequirements` accepts `{}` and reads the F&O integration user's default company. Set that default company to the same legal entity as `D365_COMPANY`. The other five operations accept `{ "_request": { ... } }` and explicitly receive `Company`.
 
 | Operation | Request example | Response example |
 | --- | --- | --- |
 | `getOpenRequirements` | [request](getOpenRequirements.request.json) | [response](getOpenRequirements.response.json) |
 | `submitApplication` | [request](submitApplication.request.json) | [response](submitApplication.response.json) |
 | `saveCandidateEvaluation` | [request](saveCandidateEvaluation.request.json) | [response](saveCandidateEvaluation.response.json) |
-| `getTopCandidates` | [request](getTopCandidates.request.json) | [response](getTopCandidates.response.json) |
-| `getMyApplications` | [request](getMyApplications.request.json) | [response](getMyApplications.response.json) |
-| `getApplication` | [request](getApplication.request.json) | [response](getApplication.response.json) |
 
-`Success`, `ConsentAccepted`, and `MeetsMinimumCriteria` are JSON booleans. Dates are ISO 8601 UTC strings. Evidence fields are JSON **strings containing arrays**, so the quotes inside them are escaped in the outer JSON. `LinkedInProfileJson` is a JSON string containing an object with the original allowlisted OIDC keys. A pending application has `Evaluation: null`, not an invented zero score. Status values are the English contract names, not translated labels or enum integers.
+`getOpenRequirements` accepts `{}` and reads the integration user's current company. Set that user's startup company to `D365_COMPANY`. Both writes accept `{ "_request": { ... } }` and require `Company` to match the same company. `Company` is service context, not a new table field. `Success` and `Message` acknowledge a write.
 
-The profile snapshot is separate from editable application contact details. A LinkedIn subject is not an email address. Do not place access tokens, ID tokens, refresh tokens, or session cookies in any memo field.
+Application requests use the screenshot fields `FirstName`, `LastName` and `LinkedInProfileUrl`. The backend freezes an `APP-<GUID>` identifier in SQLite **before** it calls F&O. F&O must return that exact `ApplicationId`; retry the identical request with the same identifier. The service creates or reuses the candidate for the same LinkedIn issuer and subject. For a genuinely new application, generate a new application GUID; do not change the old request and reuse its application ID.
 
-The example `azure:...pdf` value is a private object reference only; this request does not upload that object. The example document hash and JD hash are illustrative. For a complete portal test, submit a real document through the portal so the backend generates its storage reference, document checksum, JD context hash, identity, and evaluation. Do not use these fixture values to claim successful private resume retrieval or a genuine AI comparison.
+Evaluation requests use the confirmed table `UBHRMatchEvaluationTable`. `EvaluationId` is `EVA-` followed by the application's same GUID. `Score` is an integer from 0 to 100; `MeetsMinimumCriteria` and `Success` are JSON booleans. `MatchedSkillsJson`, `MissingSkillsJson` and `EvidenceJson` are strings containing JSON arrays, so their internal quotes are escaped in the outer request. Repeat an evaluation save with the same identifiers to update the one current evaluation for that application.
 
-The response files show possible successful shapes. IDs and timestamps are assigned by the service, so live values will differ. The pending second application in the history/ranking fixtures demonstrates nullable evaluation handling; the six example requests do not create it automatically. Repeated submissions are transport-idempotent only when the same persisted request key and identical payload are reused. A business rule about revised applications is a separate policy.
+`OpenDate` and `CloseDate` are job eligibility dates, serialized as `YYYY-MM-DD`; they are separate from portal audit metadata. Required/preferred skills are comma-delimited strings. `EvaluationCriteriaJson` and `RubricVersion` describe the existing job's business scoring criteria. The sample close date is illustrative: configure actual opening and closing dates when preparing a live test requirement.
 
-## Postman setup
+The D365 requests contain only the core requirement, candidate, application and evaluation data. The backend keeps resume references, hashes, creation/submission timestamps, consent, public LinkedIn profile JSON, idempotency state and full AI/model audit details in SQLite. A direct Postman write does **not** create that SQLite record, upload a resume, populate portal history or run an AI review. Use the React portal with a real resume for a complete workflow test.
 
-1. Import [UBHRPortal.postman_collection.json](../UBHRPortal.postman_collection.json).
-2. Set the collection's `foBaseUrl` to your actual F&O HTTPS resource URL, without a trailing slash. Set `company` to the integration user's default company and `requirementId` to an existing open requirement in that company.
-3. Acquire an Entra client-credentials access token locally for the scope `<F&O resource URL>/.default`. The application's client ID must be registered against the correctly authorized F&O integration user. This is a D365 resource token, separate from a candidate's LinkedIn sign-in.
-4. Put the token in a **local, sensitive** `accessToken` value in Postman. The exported collection deliberately contains no token or client secret. Do not share exports containing credential values.
-5. In an F&O development environment, replace the fictional identity/contact/document values as needed. `resumeBlobKey`, `resumeSha256`, and `jdHash` must describe the intended test document/context. Update `submitIdempotencyKey` to a new stable key for a genuinely new application; reuse it with the identical body when testing a retry.
-6. Run `getOpenRequirements`, then `submitApplication`. Its Postman test stores the returned `ApplicationId` in `applicationId`; the service-generated ID replaces the fictional example ID for the remaining requests.
-7. Run `getApplication` and `getMyApplications` to confirm that the application has the expected requirement, immutable owner, contact snapshot, and pending evaluation. Do not run `saveCandidateEvaluation` until an application exists.
-8. The supplied `saveCandidateEvaluation` body is a fictional contract test. In a development-only test, it checks persistence and serialization. In connected portal use, the worker sends the actual validated Azure OpenAI result. Run it, then `getTopCandidates` and `getApplication` to verify the saved evaluation.
-9. Repeat submit with the same key/body and confirm the same `ApplicationId` with no additional candidate/application. Repeat save and confirm one current evaluation for that application. These are live checks to perform in your F&O development environment; the repository fixtures do not prove that deployment succeeded.
+## Postman: test the three F&O operations
 
-Postman inherits bearer authentication from the collection. Leave SSL verification enabled and use the environment's trusted HTTPS certificate. A custom-service request rejection should be investigated as a deployment, identity, permission, company, or contract issue; the fixture response is not a replacement for the live response.
+1. Import [UBHRPortal.postman_collection.json](../UBHRPortal.postman_collection.json). Set `foBaseUrl` to your actual F&O HTTPS resource URL without a trailing slash, `company` to the integration user's company, and `requirementId` to an existing open requirement. Acquire an Entra client-credentials token for `<F&O resource URL>/.default` and keep it in a local, sensitive `accessToken` value. The collection includes no access token or client secret.
+2. Run `getOpenRequirements`, then `submitApplication`. Replace the fictional candidate contact/identity values for your development test. Keep the frozen `applicationId` unchanged on a retry. The test checks that F&O preserves it and stores the returned `CandidateId` for the next acknowledgement check. In the F&O development table browser, verify the candidate and application rows and their relationship. A repeat should preserve the application and candidate identifiers and create no duplicate application.
+3. Run `saveCandidateEvaluation` after submission. Keep `evaluationId` equal to `EVA-` plus the application's GUID; the collection checks this before sending. Its body is a fictional score/evidence persistence test, not an Azure OpenAI response. Check that the acknowledgement preserves both IDs and that `UBHRMatchEvaluationTable` contains one current row for the application. Repeating the save should update that row; a new application uses a new GUID and matching evaluation ID.
+
+For connected portal validation, submit through React so the backend creates the SQLite technical record, stores the private resume, submits the F&O application, and queues the actual resume/JD comparison. Confirm the worker saves the full result in SQLite and the core result in `UBHRMatchEvaluationTable`. Do not enter D365 tokens or credentials into React; they belong to the backend integration.
+
+The response fixtures show possible successful shapes. Actual generated candidate IDs will differ. These files do not prove that an F&O service is compiled or deployed. Keep SSL verification enabled and investigate live rejections through the F&O deployment, integration-user permissions, company and contract configuration.

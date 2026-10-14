@@ -1,6 +1,4 @@
-/// <summary>
-/// Typed operation acknowledgement. Success serializes as a JSON boolean.
-/// </summary>
+/// <summary>Typed write acknowledgement. Success is a JSON boolean.</summary>
 [DataContractAttribute]
 public final class UBHRPortalResultContract
 {

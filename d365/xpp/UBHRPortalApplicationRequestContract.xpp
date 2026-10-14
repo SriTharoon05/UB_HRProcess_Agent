@@ -1,0 +1,85 @@
+/// <summary>Candidate contacts and the selected job. Company is request context, not a new table field.</summary>
+[DataContractAttribute]
+public final class UBHRPortalApplicationRequestContract
+{
+    str company;
+    str applicationId;
+    str requirementId;
+    str firstName;
+    str lastName;
+    str email;
+    str phone;
+    str linkedInProfileUrl;
+    str linkedInIssuer;
+    str linkedInSub;
+
+    [DataMemberAttribute("Company")]
+    public str parmCompany(str _company = company)
+    {
+        company = _company;
+        return company;
+    }
+
+    [DataMemberAttribute("ApplicationId")]
+    public str parmApplicationId(str _applicationId = applicationId)
+    {
+        applicationId = _applicationId;
+        return applicationId;
+    }
+
+    [DataMemberAttribute("RequirementId")]
+    public str parmRequirementId(str _requirementId = requirementId)
+    {
+        requirementId = _requirementId;
+        return requirementId;
+    }
+
+    [DataMemberAttribute("FirstName")]
+    public str parmFirstName(str _firstName = firstName)
+    {
+        firstName = _firstName;
+        return firstName;
+    }
+
+    [DataMemberAttribute("LastName")]
+    public str parmLastName(str _lastName = lastName)
+    {
+        lastName = _lastName;
+        return lastName;
+    }
+
+    [DataMemberAttribute("Email")]
+    public str parmEmail(str _email = email)
+    {
+        email = _email;
+        return email;
+    }
+
+    [DataMemberAttribute("Phone")]
+    public str parmPhone(str _phone = phone)
+    {
+        phone = _phone;
+        return phone;
+    }
+
+    [DataMemberAttribute("LinkedInProfileUrl")]
+    public str parmLinkedInProfileUrl(str _linkedInProfileUrl = linkedInProfileUrl)
+    {
+        linkedInProfileUrl = _linkedInProfileUrl;
+        return linkedInProfileUrl;
+    }
+
+    [DataMemberAttribute("LinkedInIssuer")]
+    public str parmLinkedInIssuer(str _linkedInIssuer = linkedInIssuer)
+    {
+        linkedInIssuer = _linkedInIssuer;
+        return linkedInIssuer;
+    }
+
+    [DataMemberAttribute("LinkedInSub")]
+    public str parmLinkedInSub(str _linkedInSub = linkedInSub)
+    {
+        linkedInSub = _linkedInSub;
+        return linkedInSub;
+    }
+}

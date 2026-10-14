@@ -15,7 +15,7 @@ For a LinkedIn user, `User.name` and `User.email` can be empty strings when the 
 - `GET /api/me/applications` -> `Application[]`; `GET /api/applications/{id}` -> own Application. Never include internal evaluation in candidate responses.
 - `GET /api/hr/jobs/{requirement_id}/candidates` -> `{candidates:Candidate[], limit:number, returned_count:number}` (default limit 25, not total population).
 - `GET /api/hr/jobs/{requirement_id}/candidates/{application_id}` -> `Candidate`.
-- `GET /api/hr/applications/{id}/resume` -> authorized PDF/DOCX stream; reference must come from D365 or demo adapter.
+- `GET /api/hr/applications/{id}/resume` -> authorized PDF/DOCX stream; SQLite mode uses the acknowledged application snapshot's private reference. Legacy/demo mode uses its trusted adapter record.
 
 ```ts
 interface LinkedInProfile {sub:string; issuer:string; name:string|null; given_name:string|null; family_name:string|null; email:string|null; email_verified:boolean|null; picture:string|null; locale:string|null}

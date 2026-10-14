@@ -20,6 +20,7 @@ services:
       BACKEND_BASE_URL: http://localhost:5173
       CORS_ALLOWED_ORIGINS: '["http://localhost:5173"]'
       LOCAL_RESUME_DIR: /app/data/resumes
+      SQLITE_DATABASE_PATH: /app/data/talentmatch.sqlite3
     volumes:
       - private-resumes:/app/data
     depends_on:
@@ -41,6 +42,10 @@ services:
     environment:
       DEMO_MODE: 'false'
       REDIS_URL: redis://redis:6379/0
+      LOCAL_RESUME_DIR: /app/data/resumes
+      SQLITE_DATABASE_PATH: /app/data/talentmatch.sqlite3
+    volumes:
+      - private-resumes:/app/data
     depends_on:
       redis:
         condition: service_healthy

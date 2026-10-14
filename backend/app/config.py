@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     )
     entra_hr_role: str = "TalentMatch.HR"
     hr_allowed_roles: list[str] = ["HRRecruiter", "HRAdministrator", "TalentMatch.HR"]
+    d365_contract_mode: Literal["sqlite", "legacy"] = "sqlite"
+    sqlite_database_path: Path = Path(".local/talentmatch.sqlite3")
     d365_enabled: bool = False
     d365_base_url: str = "https://org1a43c536.operations.dynamics.com"
     d365_tenant_id: str = ""
@@ -55,11 +57,11 @@ class Settings(BaseSettings):
     d365_client_secret: str = Field(default="", repr=False)
     d365_company: str = "DAT"
     d365_parameter_name: str = "_request"
-    d365_requirement_path: str = "/api/services/UBHRApplicationServiceGroup/UBHRApplicationService/getOpenRequirements"
+    d365_requirement_path: str = "/api/services/UBHRPortalServiceGroup/UBHRPortalService/getOpenRequirements"
     d365_submit_application_path: str = (
-        "/api/services/UBHRApplicationServiceGroup/UBHRApplicationService/submitApplication"
+        "/api/services/UBHRPortalServiceGroup/UBHRPortalService/submitApplication"
     )
-    d365_save_evaluation_path: str = ""
+    d365_save_evaluation_path: str = "/api/services/UBHRPortalServiceGroup/UBHRPortalService/saveCandidateEvaluation"
     d365_top_candidates_path: str = ""
     d365_my_applications_path: str = ""
     d365_application_path: str = ""

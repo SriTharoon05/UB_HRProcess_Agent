@@ -1,29 +1,28 @@
-"""Check source metadata and exercise every example through the actual D365 adapter.
+"""Validate the three screenshot-table contracts and SQLite metadata boundary.
 
-Run from backend: uv run --frozen python ../d365/validate_bundle.py
-This is a contract check, not an X++ compiler or a live F&O deployment test.
+From backend: uv run --frozen python ../d365/validate_bundle.py
+This runs mocked HTTP calls, not an X++ compiler or a live F&O deployment test.
 """
 
 import asyncio
+import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 import httpx  # noqa: E402
 
-from app.models import Evaluation, Job, LinkedInProfile, User  # noqa: E402
-from app.services.d365 import (  # noqa: E402
-    MEMO_FIELDS,
-    PATHS,
-    REQUEST_FIELDS,
-    D365Service,
-    normalize,
-)
+from app.config import Settings  # noqa: E402
+from app.metadata import SQLiteMetadata, encode  # noqa: E402
+from app.models import Evaluation, Job, User  # noqa: E402
+from app.services.d365 import PATHS, normalize  # noqa: E402
+from app.services.sqlite_d365 import LEAN_REQUEST_FIELDS, SQLiteD365Service  # noqa: E402
 
 BUNDLE = ROOT / "d365"
 
@@ -47,15 +46,10 @@ def validate_dto(value, name, contracts):
             check(isinstance(item, list), f"{name}.{field}: expected an array")
             for row in item:
                 validate_dto(row, kind[5:-1], contracts)
-        elif kind in contracts:
-            if item is not None:
-                validate_dto(item, kind, contracts)
         else:
             valid = {
-                "str": isinstance(item, str),
-                "int": type(item) is int,
-                "real": type(item) in (int, float),
-                "boolean": type(item) is bool,
+                "str": isinstance(item, str), "int": type(item) is int,
+                "real": type(item) in (int, float), "boolean": type(item) is bool,
             }[kind]
             check(valid, f"{name}.{field}: wrong JSON type for {kind}")
 
@@ -73,100 +67,64 @@ def validate_sources(manifest, schema):
             source, flags=re.DOTALL,
         )
         for member, return_type, _accessor in accessors:
-            expected = contract["members"][member].split("<", 1)[0]
-            check(return_type == expected, f"Wrong X++ return type for {name}.{member}")
+            check(return_type == contract["members"][member].split("<", 1)[0],
+                  f"Wrong X++ return type for {name}.{member}")
         for target in contract["members"].values():
             if target.startswith("List<"):
-                row_type = target[5:-1]
-                check(f"classStr({row_type})" in source, f"Untyped list in {name}")
+                check(f"classStr({target[5:-1]})" in source, f"Untyped list in {name}")
 
-    request = contracts["UBHRPortalRequestContract"]["members"]
-    check(set(REQUEST_FIELDS.values()) <= set(request), "Backend request alias missing in DTO")
+    request_members = set()
+    for info in manifest["operations"].values():
+        if info["request"]:
+            request_members.update(contracts[info["request"]]["members"])
+    check(set(LEAN_REQUEST_FIELDS.values()) == request_members,
+          "Lean backend aliases differ from the two request DTOs")
+    check(schema["existing_tables"] is True, "The bundle must use existing tables")
+    check(schema["extended_data_types"] == {} and schema["enums"] == {},
+          "No new EDTs or enums are authorized")
+
     service = (BUNDLE / "xpp/UBHRPortalService.xpp").read_text(encoding="utf-8")
-    request_source = (ROOT / contracts["UBHRPortalRequestContract"]["source"]).read_text(encoding="utf-8")
-    request_accessors = set(re.findall(r"public\s+\w+\s+(parm\w+)\(", request_source))
-    check(set(re.findall(r"_request\.(parm\w+)\(", service)) <= request_accessors,
-          "Service refers to a missing request accessor")
-    check(service.count("[SysEntryPointAttribute(true)]") == 6, "Expected six entry points")
+    check(service.count("[SysEntryPointAttribute(true)]") == 3, "Expected three entry points")
     for operation, info in manifest["operations"].items():
         parameter = "" if info["request"] is None else f'{info["request"]} _request'
-        signature = f'public {info["response"]} {operation}({parameter})'
-        check(signature in service, f"Operation signature mismatch: {operation}")
+        check(f'public {info["response"]} {operation}({parameter})' in service,
+              f"Operation signature mismatch: {operation}")
 
-    table_types = "|".join(schema["tables"])
+    tables = schema["tables"]
+    table_types = "|".join(tables)
     declarations = re.findall(rf"\b({table_types})\s+(\w+)", service)
-    system = set(schema["system_fields"]["automatic"])
-    system.update(schema["system_fields"]["enabled_by_table_properties"])
     for table, variable in set(declarations):
-        fields = {field["name"] for field in schema["tables"][table]["fields"]} | system
+        fields = {field["name"] for field in tables[table]["fields"]} | {"RecId", "DataAreaId", "RecVersion"}
         used = set(re.findall(rf"\b{variable}\.([A-Za-z]\w*)\b(?!\s*\()", service))
         check(used <= fields, f"Unknown {table} fields: {used - fields}")
-
-    for table, spec in schema["tables"].items():
-        fields = {field["name"] for field in spec["fields"]}
-        check(len(fields) == len(spec["fields"]), f"Duplicate field in {table}")
-        for field in spec["fields"]:
-            edt = field.get("extended_data_type")
-            enum = field.get("enum_type")
-            if edt:
-                check(edt in schema["edts"] or edt in schema["standard_edts"],
-                      f"Unknown EDT for {table}.{field['name']}")
-            if enum:
-                check(enum in schema["enums"] or enum == "NoYes",
-                      f"Unknown enum for {table}.{field['name']}")
-        for index in spec["indexes"]:
-            check(set(index["fields"]) <= fields | system, f"Unknown index field in {table}")
-        for relation in spec["relations"]:
-            related = schema["tables"][relation["related_table"]]
-            related_fields = {field["name"] for field in related["fields"]} | system
-            check(relation["field"] in fields and relation["related_field"] in related_fields,
-                  f"Unknown relation field in {table}")
-        replacement = next(index for index in spec["indexes"]
-                           if index["name"] == spec["properties"]["ReplacementKey"])
-        check(not replacement["allow_duplicates"] and replacement["alternate_key"],
-              f"Invalid replacement key in {table}")
-        check(spec["properties"]["SaveDataPerCompany"] == "Yes", f"Unscoped table: {table}")
+    for table, field in re.findall(r"fieldNum\(\s*(\w+)\s*,\s*(\w+)\s*\)", service):
+        check(table in tables, f"Unprovided screenshot table: {table}")
+        spec = next((item for item in tables[table]["fields"] if item["name"] == field), None)
+        check(spec is not None, f"Unprovided screenshot column: {table}.{field}")
+        check(spec["used_by_lean_service"], f"SQLite-only/unused field referenced: {table}.{field}")
+    all_fields = {field["name"] for table in tables.values() for field in table["fields"]}
+    for contract in contracts.values():
+        check(set(contract["members"]) <= all_fields | {"Company", "Success", "Message", "Requirements"},
+              "DTO contains an unprovided business column")
 
 
-def canonical_request(body):
-    """Reverse the documented wire example into the backend's canonical payload."""
-    reverse = {}
-    for canonical, external in REQUEST_FIELDS.items():
-        reverse.setdefault(external, canonical)
-    payload = {}
-    for external, value in body.items():
-        canonical = reverse[external]
-        if canonical in MEMO_FIELDS:
-            value = normalize(json.loads(value))
-        elif canonical == "linkedin_profile":
-            value = json.loads(value)
-            LinkedInProfile.model_validate(value)
-        payload[canonical] = value
-    return payload
-
-
-async def validate_adapter(manifest):
-    requests = {}
-    responses = {}
-    operations = manifest["operations"]
-    contracts = manifest["contracts"]
-    for name, info in operations.items():
+async def validate_adapter(manifest, database):
+    requests, responses = {}, {}
+    for name, info in manifest["operations"].items():
         requests[name] = read_json(BUNDLE / f"examples/{name}.request.json")
         responses[name] = read_json(BUNDLE / f"examples/{name}.response.json")
-        validate_dto(responses[name], info["response"], contracts)
+        validate_dto(responses[name], info["response"], manifest["contracts"])
         if info["request"] is None:
             check(requests[name] == {}, f"{name} must be parameterless")
         else:
             check(set(requests[name]) == {"_request"}, f"Wrong wrapper for {name}")
-            check(set(requests[name]["_request"]) <= set(contracts[info["request"]]["members"]),
-                  f"Unknown request member in {name}")
+            validate_dto(requests[name]["_request"], info["request"], manifest["contracts"])
 
-    company = requests["submitApplication"]["_request"]["Company"]
-    settings = SimpleNamespace(d365_company=company, d365_parameter_name="_request",
-                               d365_base_url="https://fo.example.invalid", d365_http_timeout=30,
-                               d365_request_wrappers={}, d365_request_field_maps={},
-                               d365_response_field_maps={})
-    for operation, info in operations.items():
+    submit = requests["submitApplication"]["_request"]
+    settings = Settings(_env_file=None, demo_mode=False, d365_contract_mode="sqlite",
+                        d365_company=submit["Company"], d365_base_url="https://fo.example.invalid",
+                        sqlite_database_path=database)
+    for operation, info in manifest["operations"].items():
         setattr(settings, PATHS[info["backend_operation"]],
                 f'/api/services/{manifest["service_group"]}/{manifest["aot_service"]}/{operation}')
 
@@ -179,58 +137,85 @@ async def validate_adapter(manifest):
         seen.append(name)
         return httpx.Response(200, json=responses[name])
 
-    class FixtureService(D365Service):
+    class FixtureService(SQLiteD365Service):
         async def get_access_token(self, force_refresh=False):
             return "local-mocked-token"
 
+    metadata = SQLiteMetadata(database)
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        service = FixtureService(settings, client=client)
-        jobs = await service.get_open_requirements()
-        check(all(job.status == "Open" for job in jobs), "Invalid job status")
-        # Examples may become past-deadline documents. Validate the complete
-        # job shape independently of the adapter's time-dependent eligibility.
-        for row in normalize(responses["getOpenRequirements"])["requirements"]:
-            for field in ("required_skills", "preferred_skills", "required_certifications"):
-                row[field] = [part.strip() for part in re.split(r"[,;\n]", row[field]) if part.strip()]
-            Job.model_validate(row)
+        service = FixtureService(settings, metadata=metadata, client=client)
+        await service.get_open_requirements()
+        row = normalize(responses["getOpenRequirements"])["requirements"][0]
+        row["status"] = row["requirement_status"]
+        row["published_date"] = row["open_date"]
+        row["deadline"] = row["close_date"]
+        for field in ("required_skills", "preferred_skills", "required_certifications"):
+            row[field] = [part.strip() for part in re.split(r"[,;\n]", row[field]) if part.strip()]
+        # Validate historical example shape separately from current eligibility.
+        job = Job.model_validate(row)
+        profile = {"sub": submit["LinkedInSub"], "issuer": submit["LinkedInIssuer"],
+                   "name": f'{submit["FirstName"]} {submit["LastName"]}'.strip()}
+        payload = {
+            "application_id": submit["ApplicationId"], "requirement_id": submit["RequirementId"],
+            "candidate_name": profile["name"], "email": submit["Email"], "phone": submit["Phone"],
+            "linkedin_url": submit["LinkedInProfileUrl"], "owner_sub": submit["LinkedInSub"],
+            "owner_issuer": submit["LinkedInIssuer"], "linkedin_profile": profile,
+            "resume_ref": "azure:0123456789abcdef0123456789abcdef.pdf", "resume_file_name": "example.pdf",
+            "resume_sha256": "a" * 64, "job_description_hash": hashlib.sha256(job.model_dump_json().encode()).hexdigest(),
+            "consent_accepted": True, "consent_version": "v1", "consent_date": datetime.now(timezone.utc).isoformat(),
+            "idempotency_key": "fictional-local-request",
+        }
+        record = {
+            "application_id": submit["ApplicationId"], "company": submit["Company"], "payload": payload,
+            "requirement_id": submit["RequirementId"], "fingerprint": hashlib.sha256(b"fixture").hexdigest(),
+            "payload_sha256": hashlib.sha256(encode(payload).encode()).hexdigest(),
+            "stage": "ready", "job_snapshot": job.model_dump(mode="json"), "resume_ref": payload["resume_ref"],
+            "resume_file_name": payload["resume_file_name"], "created_at": payload["consent_date"],
+        }
+        key = "fixture-sqlite-submission"
+        await metadata.reserve(key, record)
+        acknowledgement = await service.submit_application(payload)
+        record.update(stage="accepted", candidate_id=acknowledgement["candidate_id"])
+        await metadata.update_submission(key, record)
 
-        submission = canonical_request(requests["submitApplication"]["_request"])
-        submission.pop("company")
-        acknowledgement = await service.submit_application(submission)
-        application_id = acknowledgement["application_id"]
         evaluation_request = requests["saveCandidateEvaluation"]["_request"]
-        evaluation_fields = {key: value for key, value in normalize(evaluation_request).items()
-                             if key in Evaluation.model_fields}
-        evaluation = Evaluation.model_validate(evaluation_fields)
-        await service.save_candidate_evaluation({
-            "application_id": application_id, "requirement_id": evaluation_request["RequirementId"],
-            "evaluation_date": evaluation_request["EvaluatedDateTime"], "evaluation": evaluation,
-        })
-        top_request = requests["getTopCandidates"]["_request"]
-        candidates = await service.get_top_candidates(top_request["RequirementId"], top_request["Limit"])
-        check(candidates[0].evaluation.score == evaluation.score, "Score was changed")
-        check(any(candidate.evaluation is None for candidate in candidates), "Missing pending example")
+        fields = {key: value for key, value in normalize(evaluation_request).items()
+                  if key in Evaluation.model_fields}
+        fields.update(score_justification="Fictional full explanation stored only in SQLite.",
+                      partially_matched_requirements=[], evaluation_confidence="Medium",
+                      model_deployment="fixture-model", prompt_version="v1", rubric_version=job.rubric_version)
+        evaluation = Evaluation.model_validate(fields)
+        await service.save_candidate_evaluation({"application_id": submit["ApplicationId"],
+                                                "requirement_id": submit["RequirementId"],
+                                                "evaluation": evaluation.model_dump(mode="json")})
 
-        mine = requests["getMyApplications"]["_request"]
-        user = User(sub=mine["LinkedInSub"], issuer=mine["LinkedInIssuer"],
-                    name="Alex Example", email="alex.example@example.com", role="candidate")
+        # The three read capabilities below use acknowledged SQLite data and
+        # must not introduce additional F&O operations or lose private metadata.
+        user = User(sub=submit["LinkedInSub"], issuer=submit["LinkedInIssuer"],
+                    name=profile["name"], email=submit["Email"], role="candidate")
         history = await service.get_my_applications(user)
-        check(all(row.owner_sub == user.sub and row.owner_issuer == user.issuer for row in history),
-              "History ownership mismatch")
-        detail = await service.get_application(application_id)
-        check(detail.evaluation.score == evaluation.score, "Detail score mismatch")
-        check(detail.evaluation_date == evaluation_request["EvaluatedDateTime"], "Timestamp mismatch")
-    check(set(seen) == set(operations), "Not all six actual adapter operations ran")
+        check(len(history) == 1 and history[0].owner_sub == user.sub, "History ownership mismatch")
+        ranking = await service.get_top_candidates(submit["RequirementId"])
+        check(ranking[0].evaluation.score == evaluation.score, "Score was changed")
+        # Reopen the same file to prove the complete state is not process memory.
+        reopened = FixtureService(settings, metadata=SQLiteMetadata(database), client=client)
+        detail = await reopened.get_application(submit["ApplicationId"])
+        check(detail.resume_ref == payload["resume_ref"], "Private resume reference lost")
+        check(detail.evaluation.score_justification == fields["score_justification"], "Full explanation lost")
+        retained = await reopened.metadata.get_application(submit["ApplicationId"], submit["Company"])
+        check(retained["payload"]["linkedin_profile"] == profile, "Profile snapshot lost")
+    check(set(seen) == set(manifest["operations"]) and len(seen) == 3,
+          "Expected exactly three actual F&O adapter calls")
 
 
 def validate_postman(manifest):
     collection = read_json(BUNDLE / "UBHRPortal.postman_collection.json")
-    check(len(collection["item"]) == 6, "Postman must expose all six operations")
+    check(len(collection["item"]) == 3, "Postman must expose exactly three operations")
     variables = {item["key"]: item["value"] for item in collection["variable"]}
     check(not variables.get("accessToken"), "Postman must not include a token")
     for item in collection["item"]:
         request = item["request"]
-        check(request["method"] == "POST", "Postman service request must use POST")
+        check(request["method"] == "POST", "Postman request must use POST")
         raw = request["url"] if isinstance(request["url"], str) else request["url"]["raw"]
         operation = raw.rsplit("/", 1)[-1]
         check(operation in manifest["operations"], "Unknown Postman operation")
@@ -239,17 +224,23 @@ def validate_postman(manifest):
         body = request["body"]["raw"]
         for key, value in variables.items():
             body = body.replace("{{" + key + "}}", str(value))
-        json.loads(body)
+        parsed = json.loads(body)
+        info = manifest["operations"][operation]
+        if info["request"]:
+            validate_dto(parsed["_request"], info["request"], manifest["contracts"])
+        else:
+            check(parsed == {}, "Postman jobs must be parameterless")
 
 
 def main():
     manifest = read_json(BUNDLE / "contracts-manifest.json")
     schema = read_json(BUNDLE / "table-specification.json")
     validate_sources(manifest, schema)
-    asyncio.run(validate_adapter(manifest))
+    with TemporaryDirectory(prefix="ubhr-contract-") as directory:
+        asyncio.run(validate_adapter(manifest, Path(directory) / "portal.sqlite3"))
     validate_postman(manifest)
-    print("PASS: metadata references, DTOs, 12 fixtures, six actual backend adapter operations, Postman")
-    print("X++ compilation, database synchronization, permissions and live F&O calls remain unverified.")
+    print("PASS: screenshot field references, five DTOs, six fixtures, three actual adapter calls, SQLite restart, Postman")
+    print("X++ compilation, existing EDT/index properties and live F&O permissions remain unverified.")
 
 
 if __name__ == "__main__":

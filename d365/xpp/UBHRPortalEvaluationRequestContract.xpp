@@ -1,0 +1,100 @@
+/// <summary>Only the business result is sent to F&O. Technical AI metadata stays in SQLite.</summary>
+[DataContractAttribute]
+public final class UBHRPortalEvaluationRequestContract
+{
+    str company;
+    str evaluationId;
+    str applicationId;
+    str requirementId;
+    int score;
+    boolean meetsMinimumCriteria;
+    str matchLabel;
+    str summary;
+    str matchedSkillsJson;
+    str missingSkillsJson;
+    str evidenceJson;
+
+    public void new()
+    {
+        matchedSkillsJson = "[]";
+        missingSkillsJson = "[]";
+        evidenceJson = "[]";
+    }
+
+    [DataMemberAttribute("Company")]
+    public str parmCompany(str _company = company)
+    {
+        company = _company;
+        return company;
+    }
+
+    [DataMemberAttribute("EvaluationId")]
+    public str parmEvaluationId(str _evaluationId = evaluationId)
+    {
+        evaluationId = _evaluationId;
+        return evaluationId;
+    }
+
+    [DataMemberAttribute("ApplicationId")]
+    public str parmApplicationId(str _applicationId = applicationId)
+    {
+        applicationId = _applicationId;
+        return applicationId;
+    }
+
+    [DataMemberAttribute("RequirementId")]
+    public str parmRequirementId(str _requirementId = requirementId)
+    {
+        requirementId = _requirementId;
+        return requirementId;
+    }
+
+    [DataMemberAttribute("Score")]
+    public int parmScore(int _score = score)
+    {
+        score = _score;
+        return score;
+    }
+
+    [DataMemberAttribute("MeetsMinimumCriteria")]
+    public boolean parmMeetsMinimumCriteria(boolean _meetsMinimumCriteria = meetsMinimumCriteria)
+    {
+        meetsMinimumCriteria = _meetsMinimumCriteria;
+        return meetsMinimumCriteria;
+    }
+
+    [DataMemberAttribute("MatchLabel")]
+    public str parmMatchLabel(str _matchLabel = matchLabel)
+    {
+        matchLabel = _matchLabel;
+        return matchLabel;
+    }
+
+    [DataMemberAttribute("Summary")]
+    public str parmSummary(str _summary = summary)
+    {
+        summary = _summary;
+        return summary;
+    }
+
+    [DataMemberAttribute("MatchedSkillsJson")]
+    public str parmMatchedSkillsJson(str _matchedSkillsJson = matchedSkillsJson)
+    {
+        matchedSkillsJson = _matchedSkillsJson;
+        return matchedSkillsJson;
+    }
+
+    [DataMemberAttribute("MissingSkillsJson")]
+    public str parmMissingSkillsJson(str _missingSkillsJson = missingSkillsJson)
+    {
+        missingSkillsJson = _missingSkillsJson;
+        return missingSkillsJson;
+    }
+
+    [DataMemberAttribute("EvidenceJson")]
+    public str parmEvidenceJson(str _evidenceJson = evidenceJson)
+    {
+        evidenceJson = _evidenceJson;
+        return evidenceJson;
+    }
+}
