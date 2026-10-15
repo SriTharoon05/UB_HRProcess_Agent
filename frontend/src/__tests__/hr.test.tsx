@@ -160,8 +160,9 @@ describe('candidate evidence review', () => {
     panel = screen.getByRole('tabpanel');
     expect(within(panel).getByText('Production accessibility audit')).toBeVisible();
     expect(within(panel).getByText(/does not establish that the candidate lacks the skill/)).toBeVisible();
-    await user.click(screen.getByRole('tab', {name: /Resume evidence/}));
-    expect(within(screen.getByRole('tabpanel')).getByText('Shipped a shared component library for three teams.')).toBeVisible();
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
+    expect(screen.queryByRole('tab', {name: /Resume evidence/})).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipped a shared component library for three teams.')).not.toBeInTheDocument();
     expect(screen.getByText(/Model: test-model · Prompt: test-v1 · Rubric: test-v1/)).toBeVisible();
   });
 
@@ -175,6 +176,13 @@ describe('candidate evidence review', () => {
     expect(partial).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', partial.id);
     await userEvent.keyboard('{ArrowLeft}');
+    expect(supported).toHaveFocus();
+    expect(supported).toHaveAttribute('aria-selected', 'true');
+    await userEvent.keyboard('{ArrowLeft}');
+    const missing = screen.getByRole('tab', {name: /Not evidenced/});
+    expect(missing).toHaveFocus();
+    expect(missing).toHaveAttribute('aria-selected', 'true');
+    await userEvent.keyboard('{ArrowRight}');
     expect(supported).toHaveFocus();
     expect(supported).toHaveAttribute('aria-selected', 'true');
   });

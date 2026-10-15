@@ -18,6 +18,55 @@ Only `127.0.0.1:7242` is published. API port 8000 and Redis are internal. Start/
 
 Images do not include `.env`, certificates, database contents, or uploaded resumes. Share secrets through an approved secure channel, never inside the public image or Git repository. Docker host administrators can inspect runtime environment values.
 
+## Quick Windows handoff after the Supabase migration
+
+Your SQLite records are already in Supabase. The new machine uses that same database and the existing D365, Blob and AI services; **do not repeat the migration or transfer SQLite files**.
+
+1. **On the developer machine**, install/start Docker Desktop with Linux containers. From the repository root, pull the latest code and export fresh images:
+
+   ```powershell
+   git pull --ff-only origin main
+   .\scripts\docker\export.ps1 -OutputDirectory .\dist\talentmatch -Build
+   ```
+
+   ZIP the **whole** `dist\talentmatch` folder, including `images.tar`, `images.sha256`, `compose.yml`, scripts and docs. Transfer this ZIP and the working `backend\.env` separately through your private transfer method. Export does not copy `.env` into the bundle.
+
+2. **On the new machine**, install Docker Desktop, enable its WSL 2 backend/Linux containers, and complete any requested restart. Start Docker Desktop and wait until the engine is running. No Python, Node.js, Git, Visual Studio or source files are required there. Internet access is required for Supabase and the other connected services.
+
+3. Extract the runtime folder as `C:\TalentMatch`, with `compose.yml` directly inside it. Copy your working `backend\.env` to **`C:\TalentMatch\.env`**; confirm Windows has not named it `.env.txt`.
+
+4. Edit these lines in the recipient's `.env`, retaining the actual existing `DATABASE_URL` and provider credentials:
+
+   ```dotenv
+   METADATA_BACKEND=postgres
+   DATABASE_URL=YOUR_EXISTING_WORKING_SUPABASE_CONNECTION_STRING
+   DATABASE_SSLMODE=require
+   DATABASE_SSLROOTCERT=
+   DATABASE_CONNECT_TIMEOUT=10
+   REDIS_URL=redis://redis:6379/0
+   ```
+
+   Keep the existing D365 company, credentials and operation paths; Blob container/connection; Azure AI endpoint/key/deployment; LinkedIn client settings; and HR credentials. Keep `D365_CONTRACT_MODE=sqlite`: this names the ERP contract, not the metadata database. `require` is the local Supabase setting already chosen for this installation: it encrypts the connection without checking the server certificate identity. This does not change Azure's separate certificate-verifying configuration.
+
+5. Stop the developer machine's API and worker before starting the recipient stack. With a shared Supabase database and independent local Redis instances, keep **one active connected API/worker stack**. If the developer Docker group is running, stop that group too.
+
+6. Double-click **`C:\TalentMatch\setup.cmd`** once. Alternatively, from PowerShell:
+
+   ```powershell
+   cd C:\TalentMatch
+   powershell -ExecutionPolicy Bypass -File .\setup.ps1
+   ```
+
+   Setup imports the images, generates/trusts a fresh HTTPS localhost certificate for this machine, and starts frontend, API, worker and Redis. This browser certificate is separate from the Supabase database certificate setting. Do not copy `.certs` from another PC. If company policy blocks local certificate trust, IT must import the generated public `.certs\rootCA.pem` for the browser user.
+
+   First startup may take a few minutes while the application reads cloud metadata; the start wrapper allows up to 10 minutes for readiness.
+
+7. Open **https://localhost:7242**. Open **https://localhost:7242/hr** directly for HR; the public careers portal has no HR navigation. Keep the LinkedIn developer application's registered callback as `https://localhost:7242/auth/linkedin/callback`.
+
+8. For later use, open **Docker Desktop → Containers → talentmatch → Play** to start the complete application group. If you edit `.env`, run `start.cmd` or `start.ps1` instead so Compose applies the changed values. Keep the folder and Docker volumes; restarting does not require another import or migration.
+
+Check `docker compose ps` and `docker compose logs --tail 100 api worker` from `C:\TalentMatch` if startup fails. Confirm your existing applications and evaluations are visible, then submit a synthetic application to verify the connected flow. Existing resumes remain in the same private Azure Blob container.
+
 ## 1. Build on the developer's machine
 
 From PowerShell at the repository root, with Docker Desktop running:

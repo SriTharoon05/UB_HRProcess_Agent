@@ -1035,9 +1035,7 @@ export function CandidateDetailPage() {
     queryFn: () => api.candidate(requirementId, applicationId),
     refetchInterval: (value) => value.state.data && ["pending", "queued", "processing", "retrying"].includes(value.state.data.ai_status.toLowerCase()) ? 5_000 : false,
   });
-  const [tab, setTab] = useState<
-    "matched" | "partial" | "missing" | "evidence"
-  >("matched");
+  const [tab, setTab] = useState<"matched" | "partial" | "missing">("matched");
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resume, setResume] = useState<{
     url: string;
@@ -1123,11 +1121,6 @@ export function CandidateDetailPage() {
       key: "missing" as const,
       label: "Not evidenced",
       count: evaluation?.not_evidenced_requirements.length || 0,
-    },
-    {
-      key: "evidence" as const,
-      label: "Resume evidence",
-      count: evaluation?.relevant_evidence.length || 0,
     },
   ];
   return (
@@ -1333,13 +1326,6 @@ export function CandidateDetailPage() {
                     {tab === "missing" && (
                       <GapList items={evaluation.not_evidenced_requirements} />
                     )}
-                    {tab === "evidence" && (
-                      <EvidenceList
-                        items={evaluation.relevant_evidence}
-                        tone="evidence"
-                        empty="No additional supporting evidence was included."
-                      />
-                    )}
                   </RecordScroll>
                 </div>
               </section>
@@ -1430,7 +1416,7 @@ function EvidenceList({
   empty,
 }: {
   items: Evidence[];
-  tone: "matched" | "partial" | "evidence";
+  tone: "matched" | "partial";
   empty: string;
 }) {
   return items.length ? (
