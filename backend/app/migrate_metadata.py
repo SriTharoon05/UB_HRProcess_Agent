@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import json
 import sqlite3
+import sys
 from contextlib import closing
 from pathlib import Path
 
@@ -135,6 +136,8 @@ def main():
     except Exception as exc:
         # No driver exception text or connection URI may enter operator logs.
         log_event("metadata.migration", "failed", **error_fields(exc))
+        if isinstance(exc, IntegrationError):
+            print("Migration failed: " + exc.detail, file=sys.stderr)
         raise SystemExit(1) from None
 
 

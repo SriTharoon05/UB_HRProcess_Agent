@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from app.errors import ConfigurationError, IntegrationError
 from app.metadata import encode
 from app.observability import log_event, traced
+from app.postgres_diagnostics import postgres_failure
 
 SCHEMA_LOCK = 8247392194581
 EVALUATION_LOCK_NAMESPACE = 8247392194582
@@ -71,18 +72,26 @@ class PostgresMetadata:
     def connection(self):
         # psycopg exceptions may contain the password, host or SQL parameters.
         # Only fixed, value-free application errors may leave this boundary.
+        operation = "connect"
         try:
             with psycopg.connect(self._url, **self._options) as connection:
                 # SQL-level LOCAL settings also work with poolers which reject
                 # the PostgreSQL startup packet's options parameter.
+                operation = "session_setup"
                 connection.execute("SET LOCAL statement_timeout='30s'")
                 connection.execute("SET LOCAL lock_timeout='30s'")
+                operation = "transaction"
                 yield connection
+                operation = "commit"
         except psycopg.Error as exc:
+            reason, detail, retryable = postgres_failure(exc)
+            code = exc.sqlstate
+            if not (isinstance(code, str) and len(code) == 5 and code.isascii() and code.isalnum() and code == code.upper()):
+                code = None
             log_event("postgres.transaction", "failed", exception_type=type(exc).__name__,
-                      storage="postgres", reason="database_operation_failed")
-            raise IntegrationError("PostgreSQL metadata operation failed; check database connectivity and permissions",
-                                   status_code=503) from None
+                      storage="postgres", reason=reason, operation=operation, mode=self._options["sslmode"],
+                      error_code=code, hint=detail, retryable=retryable)
+            raise IntegrationError(detail, status_code=503, retryable=retryable) from None
 
     @traced("postgres.initialize")
     def _initialize(self):
