@@ -314,7 +314,7 @@ export function JobsPage() {
     setVisible(9);
   }
   return (
-    <div className="page">
+    <div className="page page-records jobs-page">
       <PageHeading
         eyebrow="FIND YOUR NEXT CHAPTER"
         title="Opportunity looks good on you."
@@ -403,7 +403,7 @@ export function JobsPage() {
           }}
         />
       ) : jobs.length ? (
-        <>
+        <div className="records-scroll scroll-region" role="region" aria-label="Open roles" tabIndex={0}>
           <div className="job-grid">
             {jobs.slice(0, visible).map((job, index) => (
               <JobCard key={job.requirement_id} job={job} index={index} />
@@ -420,7 +420,7 @@ export function JobsPage() {
               </Button>
             </div>
           )}
-        </>
+        </div>
       ) : (
         <EmptyState
           title={active ? "No matches just yet" : "Your next chapter is coming"}
@@ -471,7 +471,7 @@ export function JobDetailsPage() {
     );
   const job = query.data;
   return (
-    <div className="page">
+    <div className="page page-detail">
       <Breadcrumbs
         items={[{ label: "Opportunities", to: "/jobs" }, { label: job.title }]}
       />
@@ -504,7 +504,7 @@ export function JobDetailsPage() {
         <StatusBadge status={job.status} />
       </div>
       <div className="details-grid">
-        <article className="card job-description">
+        <article className="card job-description scroll-region" aria-label="Job description" tabIndex={0}>
           <h2>A role with room for your potential.</h2>
           {job.description ? (
             <p className="preserve-lines">{job.description}</p>
@@ -551,10 +551,10 @@ export function JobDetailsPage() {
             </p>
           </div>
         </article>
-        <aside>
+        <aside className="job-details-aside">
           <section className="card role-summary">
             <h3>The opportunity, at a glance</h3>
-            <dl>
+            <dl className="scroll-region" aria-label="Role overview" tabIndex={0}>
               {job.department && (
                 <div>
                   <dt>Team</dt>
@@ -1017,7 +1017,7 @@ export function ApplyPage() {
       </div>
     );
   return (
-    <div className="page">
+    <div className="page page-apply">
       <Breadcrumbs
         items={[
           { label: "Opportunities", to: "/jobs" },
@@ -1036,197 +1036,199 @@ export function ApplyPage() {
           onSubmit={handleSubmit(submit)}
           noValidate
         >
-          {user?.linkedin_profile && (
-            <LinkedInProfileSummary profile={user.linkedin_profile} />
-          )}
-          <div className="form-section-title">
-            <span>01</span>
-            <div>
-              <h2>A little about you</h2>
-              <p>Confirm your name and contact email for this application.</p>
-            </div>
-          </div>
-          <div className="form-grid">
-            <div className="form-field">
-              <label htmlFor="candidate-name">Full name</label>
-              <input
-                id="candidate-name"
-                autoComplete="name"
-                disabled={isSubmitting}
-                {...nameField}
-                onChange={(event) => {
-                  contactEdited.current.candidate_name = true;
-                  void nameField.onChange(event);
-                }}
-                aria-invalid={Boolean(errors.candidate_name)}
-              />
-              {errors.candidate_name && (
-                <span className="field-error">
-                  {errors.candidate_name.message}
-                </span>
-              )}
-            </div>
-            <div className="form-field">
-              <label htmlFor="candidate-email">Email address</label>
-              <input
-                id="candidate-email"
-                type="email"
-                autoComplete="email"
-                disabled={isSubmitting}
-                {...emailField}
-                onChange={(event) => {
-                  contactEdited.current.email = true;
-                  void emailField.onChange(event);
-                }}
-                aria-invalid={Boolean(errors.email)}
-              />
-              {errors.email && (
-                <span className="field-error">{errors.email.message}</span>
-              )}
-            </div>
-            <div className="form-field">
-              <label htmlFor="phone">
-                Phone number <span>(optional)</span>
-              </label>
-              <input
-                id="phone"
-                type="tel"
-                autoComplete="tel"
-                placeholder="Your contact number"
-                {...register("phone")}
-                aria-invalid={Boolean(errors.phone)}
-              />
-              {errors.phone && (
-                <span className="field-error">{errors.phone.message}</span>
-              )}
-            </div>
-            <div className="form-field">
-              <label htmlFor="linkedin-url">
-                LinkedIn profile <span>(optional)</span>
-              </label>
-              <input
-                id="linkedin-url"
-                type="url"
-                placeholder="https://linkedin.com/in/your-name"
-                {...register("linkedin_url")}
-                aria-invalid={Boolean(errors.linkedin_url)}
-              />
-              {errors.linkedin_url && (
-                <span className="field-error">
-                  {errors.linkedin_url.message}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="form-section-title">
-            <span>02</span>
-            <div>
-              <h2>Let your experience speak</h2>
-              <p>Share a resume that tells your story.</p>
-            </div>
-          </div>
-          <label
-            htmlFor="resume-upload"
-            className={`resume-dropzone ${dragging ? "dropzone-active" : ""} ${fileError ? "dropzone-error" : ""}`}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={drop}
-          >
-            <span className="upload-icon">
-              <UploadCloud size={25} />
-            </span>
-            <strong>
-              {file
-                ? "Your story is ready to share"
-                : "Drop your resume right here"}
-            </strong>
-            <span>
-              or <u>browse your files</u>
-            </span>
-            <small>PDF or DOCX · Up to 10 MB</small>
-            <input
-              id="resume-upload"
-              aria-label="Upload resume"
-              data-testid="resume-input"
-              name="resume"
-              type="file"
-              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              disabled={isSubmitting}
-              onChange={(event) => selectFile(event.target.files?.[0] || null)}
-            />
-          </label>
-          {file && (
-            <div className="selected-file">
-              <span className="file-type-icon">
-                <FileText size={21} />
-              </span>
+          <div className="application-form-content scroll-region" role="region" aria-label="Application details" tabIndex={0}>
+            {user?.linkedin_profile && (
+              <LinkedInProfileSummary profile={user.linkedin_profile} />
+            )}
+            <div className="form-section-title">
+              <span>01</span>
               <div>
-                <strong>{file.name}</strong>
-                <span>
-                  {(file.size / 1024).toFixed(1)} KB · Ready to upload
-                </span>
+                <h2>A little about you</h2>
+                <p>Confirm your name and contact email for this application.</p>
               </div>
-              <button
-                type="button"
-                aria-label="Remove selected resume"
-                disabled={isSubmitting}
-                onClick={() => {
-                  setFile(null);
-                  setFileError(null);
-                }}
-              >
-                <X size={17} />
-              </button>
             </div>
-          )}
-          {fileError && (
-            <p className="field-error" role="alert">
-              {fileError}
-            </p>
-          )}
-          <div className="consent-box">
-            <label className="checkbox-label">
-              <input
-                data-testid="application-consent"
-                type="checkbox"
-                {...register("consent")}
-                aria-invalid={Boolean(errors.consent)}
-              />
-              <span>
-                I consent to processing my application and resume for
-                recruitment, including AI-assisted evidence analysis. I
-                understand that the recruitment team makes the hiring decisions.
+            <div className="form-grid">
+              <div className="form-field">
+                <label htmlFor="candidate-name">Full name</label>
+                <input
+                  id="candidate-name"
+                  autoComplete="name"
+                  disabled={isSubmitting}
+                  {...nameField}
+                  onChange={(event) => {
+                    contactEdited.current.candidate_name = true;
+                    void nameField.onChange(event);
+                  }}
+                  aria-invalid={Boolean(errors.candidate_name)}
+                />
+                {errors.candidate_name && (
+                  <span className="field-error">
+                    {errors.candidate_name.message}
+                  </span>
+                )}
+              </div>
+              <div className="form-field">
+                <label htmlFor="candidate-email">Email address</label>
+                <input
+                  id="candidate-email"
+                  type="email"
+                  autoComplete="email"
+                  disabled={isSubmitting}
+                  {...emailField}
+                  onChange={(event) => {
+                    contactEdited.current.email = true;
+                    void emailField.onChange(event);
+                  }}
+                  aria-invalid={Boolean(errors.email)}
+                />
+                {errors.email && (
+                  <span className="field-error">{errors.email.message}</span>
+                )}
+              </div>
+              <div className="form-field">
+                <label htmlFor="phone">
+                  Phone number <span>(optional)</span>
+                </label>
+                <input
+                  id="phone"
+                  type="tel"
+                  autoComplete="tel"
+                  placeholder="Your contact number"
+                  {...register("phone")}
+                  aria-invalid={Boolean(errors.phone)}
+                />
+                {errors.phone && (
+                  <span className="field-error">{errors.phone.message}</span>
+                )}
+              </div>
+              <div className="form-field">
+                <label htmlFor="linkedin-url">
+                  LinkedIn profile <span>(optional)</span>
+                </label>
+                <input
+                  id="linkedin-url"
+                  type="url"
+                  placeholder="https://linkedin.com/in/your-name"
+                  {...register("linkedin_url")}
+                  aria-invalid={Boolean(errors.linkedin_url)}
+                />
+                {errors.linkedin_url && (
+                  <span className="field-error">
+                    {errors.linkedin_url.message}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="form-section-title">
+              <span>02</span>
+              <div>
+                <h2>Let your experience speak</h2>
+                <p>Share a resume that tells your story.</p>
+              </div>
+            </div>
+            <label
+              htmlFor="resume-upload"
+              className={`resume-dropzone ${dragging ? "dropzone-active" : ""} ${fileError ? "dropzone-error" : ""}`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={drop}
+            >
+              <span className="upload-icon">
+                <UploadCloud size={25} />
               </span>
+              <strong>
+                {file
+                  ? "Your story is ready to share"
+                  : "Drop your resume right here"}
+              </strong>
+              <span>
+                or <u>browse your files</u>
+              </span>
+              <small>PDF or DOCX · Up to 10 MB</small>
+              <input
+                id="resume-upload"
+                aria-label="Upload resume"
+                data-testid="resume-input"
+                name="resume"
+                type="file"
+                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                disabled={isSubmitting}
+                onChange={(event) => selectFile(event.target.files?.[0] || null)}
+              />
             </label>
-            <p>
-              Consent version {session?.consent_version || "v1"}. Your
-              information is used to review your application for this role and
-              manage the recruitment process.
-            </p>
-          </div>
-          {errors.consent && (
-            <p className="field-error" role="alert">
-              {errors.consent.message}
-            </p>
-          )}
-          {session?.demo_mode && (
-            <div className="inline-demo-note">
-              <Sparkles size={16} />
+            {file && (
+              <div className="selected-file">
+                <span className="file-type-icon">
+                  <FileText size={21} />
+                </span>
+                <div>
+                  <strong>{file.name}</strong>
+                  <span>
+                    {(file.size / 1024).toFixed(1)} KB · Ready to upload
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Remove selected resume"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setFile(null);
+                    setFileError(null);
+                  }}
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            )}
+            {fileError && (
+              <p className="field-error" role="alert">
+                {fileError}
+              </p>
+            )}
+            <div className="consent-box">
+              <label className="checkbox-label">
+                <input
+                  data-testid="application-consent"
+                  type="checkbox"
+                  {...register("consent")}
+                  aria-invalid={Boolean(errors.consent)}
+                />
+                <span>
+                  I consent to processing my application and resume for
+                  recruitment, including AI-assisted evidence analysis. I
+                  understand that the recruitment team makes the hiring decisions.
+                </span>
+              </label>
               <p>
-                Demo mode: your document will be stored locally. Any evaluation
-                shown is a labeled fictional sample, not an analysis of your
-                resume.
+                Consent version {session?.consent_version || "v1"}. Your
+                information is used to review your application for this role and
+                manage the recruitment process.
               </p>
             </div>
-          )}
-          {submitError && (
-            <div className="submit-error" role="alert">
-              {submitError}
-            </div>
-          )}
+            {errors.consent && (
+              <p className="field-error" role="alert">
+                {errors.consent.message}
+              </p>
+            )}
+            {session?.demo_mode && (
+              <div className="inline-demo-note">
+                <Sparkles size={16} />
+                <p>
+                  Demo mode: your document will be stored locally. Any evaluation
+                  shown is a labeled fictional sample, not an analysis of your
+                  resume.
+                </p>
+              </div>
+            )}
+            {submitError && (
+              <div className="submit-error" role="alert">
+                {submitError}
+              </div>
+            )}
+          </div>
           <div className="form-actions">
             <Link to={`/jobs/${requirementId}`} className="text-link">
               <ChevronLeft size={14} />
@@ -1248,7 +1250,7 @@ export function ApplyPage() {
             </Button>
           </div>
         </form>
-        <aside>
+        <aside className="scroll-region" aria-label="Selected role" tabIndex={0}>
           <section className="card application-job-card">
             <JobIcon department={job.department} />
             <Badge>{job.department || "Open opportunity"}</Badge>
@@ -1324,7 +1326,7 @@ export function ApplicationsPage() {
     refetchInterval: 30_000,
   });
   return (
-    <div className="page">
+    <div className="page page-records">
       <PageHeading
         eyebrow="YOUR CANDIDATE WORKSPACE"
         title={`Your story, in motion${firstName ? `, ${firstName}` : ""}.`}
@@ -1359,8 +1361,8 @@ export function ApplicationsPage() {
           }}
         />
       ) : query.data?.length ? (
-        <div className="card application-list">
-          <div className="table-scroll">
+        <div className="card application-list record-card">
+          <div className="table-scroll scroll-region" role="region" aria-label="My applications" tabIndex={0}>
             <table>
               <thead>
                 <tr>

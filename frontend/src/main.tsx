@@ -8,6 +8,7 @@ import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
 import "@fontsource/inter/700.css";
 import "./styles.css";
+import "./viewport.css";
 import { AuthProvider } from "./lib/auth";
 import { App } from "./app";
 import { appName } from "./lib/config";

@@ -1,0 +1,369 @@
+/* Keep the application shell stable; growing content scrolls inside its panel. */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+.app-frame.workspace-frame {
+  height: calc(100vh - 32px);
+  height: calc(100dvh - 32px);
+  min-height: 0;
+  width: calc(100% - 32px);
+  margin: 16px auto;
+  overflow: hidden;
+}
+
+.app-frame.careers-frame {
+  display: grid;
+  grid-template-rows: 4px auto minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-frame .app-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-body > main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-frame .sidebar {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.careers-masthead {
+  width: 100%;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.app-frame .topbar {
+  flex-shrink: 0;
+  min-height: 68px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.app-frame .app-footer {
+  flex-shrink: 0;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.app-frame .page {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  padding-bottom: 20px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.scroll-region {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #91b6c9 #edf4f8;
+}
+
+.scroll-region:focus-visible {
+  outline-offset: -3px;
+}
+
+.app-frame .page-records,
+.app-frame .page-detail,
+.app-frame .page-apply,
+.app-frame .page-evaluation {
+  display: flex;
+  flex-direction: column;
+}
+
+.page-records > :not(.record-card):not(.records-scroll),
+.page-detail > :not(.details-grid),
+.page-apply > :not(.application-grid),
+.page-evaluation > :not(.evaluation-grid) {
+  flex-shrink: 0;
+}
+
+.record-card,
+.records-scroll {
+  flex: 1 1 0;
+  min-height: 160px;
+}
+
+.record-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.record-card > .table-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.table-scroll th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f5f9fc;
+  box-shadow: inset 0 -1px #dce7ef;
+}
+
+.record-card > .table-footer {
+  flex-shrink: 0;
+}
+
+.records-scroll > .job-grid {
+  align-content: start;
+  padding: 3px 3px 12px;
+}
+
+.page-records .page-heading,
+.page-evaluation .page-heading {
+  margin-bottom: 18px;
+}
+
+.page-records .results-heading {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.ranking-page .ranking-summary {
+  padding-bottom: 14px;
+}
+
+.ranking-page .review-notice {
+  margin-bottom: 14px;
+}
+
+.ranking-page .ranking-toolbar {
+  margin-bottom: 14px;
+}
+
+.ranking-page .data-scope-note {
+  margin-top: 10px;
+}
+
+.recent-candidate-card > .table-scroll {
+  max-height: 340px;
+}
+
+.app-frame .page-detail,
+.app-frame .page-apply,
+.app-frame .page-evaluation {
+  overflow: hidden;
+}
+
+.page-detail > .details-grid,
+.page-apply > .application-grid,
+.page-evaluation > .evaluation-grid {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.page-detail .job-description {
+  min-height: 0;
+}
+
+.job-details-aside {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.job-details-aside .role-summary {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.job-details-aside .role-summary h3 {
+  flex-shrink: 0;
+  margin-bottom: 12px;
+}
+
+.job-details-aside .role-summary dl {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  margin-bottom: 16px;
+}
+
+.job-details-aside .role-summary > .button,
+.job-details-aside .role-summary > .small-note {
+  flex-shrink: 0;
+}
+
+.job-details-aside .application-aside-note {
+  flex-shrink: 0;
+  padding: 14px 12px;
+}
+
+.page-apply .application-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.application-form-content {
+  flex: 1;
+  padding: 26px;
+}
+
+.page-apply .form-actions {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 16px 24px;
+  background: #fff;
+}
+
+.page-evaluation .candidate-profile {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.candidate-profile-content {
+  flex: 1;
+  padding: 22px;
+}
+
+.page-evaluation .candidate-profile > .button {
+  flex-shrink: 0;
+  width: calc(100% - 40px);
+  margin: 12px 20px 0;
+}
+
+.page-evaluation .candidate-profile > .small-note {
+  flex-shrink: 0;
+  margin: 10px 20px 16px;
+}
+
+.page-evaluation .evaluation-main {
+  min-height: 0;
+  padding-right: 3px;
+}
+
+.evidence-tab-panel {
+  max-height: min(52dvh, 560px);
+}
+
+/* Small screens keep the same shell, with reachable stacked scroll panels. */
+@media (max-width: 850px) {
+  .app-frame.workspace-frame {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  .careers-masthead {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .app-frame .topbar {
+    min-height: 60px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+}
+
+@media (max-width: 680px), (max-height: 600px) {
+  .record-card,
+  .records-scroll {
+    flex: none;
+    height: clamp(240px, 55dvh, 520px);
+  }
+}
+
+@media (max-width: 680px), (max-height: 600px) {
+  .app-frame .page-detail,
+  .app-frame .page-apply,
+  .app-frame .page-evaluation {
+    overflow: auto;
+  }
+
+  .page-detail > .details-grid,
+  .page-apply > .application-grid,
+  .page-evaluation > .evaluation-grid {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .page-detail .job-description {
+    flex: none;
+    height: clamp(280px, 58dvh, 600px);
+  }
+
+  .page-detail .job-details-aside {
+    flex: none;
+    overflow: visible;
+  }
+
+  .job-details-aside .role-summary {
+    flex: none;
+  }
+
+  .job-details-aside .role-summary dl {
+    flex: none;
+    max-height: 260px;
+  }
+
+  .page-apply .application-form {
+    flex: none;
+    height: clamp(440px, 75dvh, 760px);
+  }
+
+  .application-form-content {
+    padding: 22px;
+  }
+
+  .page-apply .application-grid > aside {
+    overflow: visible;
+  }
+
+  .page-evaluation .candidate-profile {
+    flex: none;
+    height: 400px;
+  }
+
+  .page-evaluation .evaluation-main {
+    flex: none;
+    height: clamp(440px, 75dvh, 760px);
+  }
+}

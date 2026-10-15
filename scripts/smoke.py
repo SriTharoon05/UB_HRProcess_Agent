@@ -107,11 +107,33 @@ def main():
         downloaded = context.request.get(f"{base}/api/hr/applications/{application_id}/resume")
         assert downloaded.ok and downloaded.body() == resume_path.read_bytes()
 
+        # Long descriptions must scroll within the card without extending the
+        # document or moving the apply action outside the desktop viewport.
+        long_job = context.request.get(f"{base}/api/jobs/{requirement_id}").json()
+        long_job["description"] = "\n\n".join(
+            f"{index + 1}. Fictional requirement: build accessible business applications."
+            for index in range(200)
+        )
+        job_route = f"**/api/jobs/{requirement_id}"
+        page.route(job_route, lambda route: route.fulfill(json=long_job))
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.goto(f"{base}/jobs/{requirement_id}")
+        description = page.get_by_role("article", name="Job description")
+        expect(description).to_be_visible()
+        assert description.evaluate("element => element.scrollHeight > element.clientHeight + 500")
+        description.focus()
+        description.press("End")
+        page.wait_for_function("document.querySelector('.job-description').scrollTop > 0")
+        assert page.evaluate("document.documentElement.scrollHeight <= innerHeight + 1")
+        expect(page.get_by_role("link", name="Sign in with LinkedIn to apply")).to_be_in_viewport()
+        page.unroute(job_route)
+
         # Responsive navigation should remain usable without horizontal overflow.
         page.set_viewport_size({"width": 390, "height": 844})
         page.goto(f"{base}/hr")
         expect(page.get_by_role("button", name="Open navigation")).to_be_visible()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        assert page.evaluate("document.documentElement.scrollHeight <= window.innerHeight + 1")
         assert not js_errors, f"Browser errors: {js_errors}"
         print(
             json.dumps(
@@ -127,6 +149,7 @@ def main():
                         "HR authorization",
                         "candidate evidence",
                         "private resume download",
+                        "bounded description and visible apply action",
                         "mobile layout",
                         "no browser exceptions",
                     ],
