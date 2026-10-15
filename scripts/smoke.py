@@ -21,6 +21,98 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.config import get_settings  # noqa: E402
 
 
+def verify_collection_layout(page, base, requirement_id, candidate, job):
+    """Read-only browser fixtures exercise full rows without changing demo records."""
+    candidates_path = re.compile(rf"/api/hr/jobs/{re.escape(requirement_id)}/candidates$")
+    job_path = re.compile(rf"/api/jobs/{re.escape(requirement_id)}$")
+    fixture = {}
+
+    def candidates_route(route):
+        route.fulfill(json=fixture)
+
+    long_job = {
+        **job,
+        "department": "Enterprise Applications",
+        "location": "Chennai, Tamil Nadu, India",
+        "work_mode": "Hybrid",
+        "employment_type": "Permanent",
+        "min_experience": 3,
+        "max_experience": 6,
+        "openings": 2,
+        "published_date": "2026-10-13",
+        "deadline": "2026-10-23",
+        "description": "\n\n".join(["Review requirements and deliver maintainable business applications."] * 60),
+    }
+
+    def job_route(route):
+        route.fulfill(json=long_job)
+
+    page.route(candidates_path, candidates_route)
+    page.route(job_path, job_route)
+    try:
+        page.set_viewport_size({"width": 1440, "height": 768})
+        for count in (4, 9):
+            fixture = {
+                "limit": 25,
+                "returned_count": count,
+                "candidates": [
+                    {
+                        **candidate,
+                        "application_id": f"APP-layout-{index:02d}-failed-candidate",
+                        "candidate_name": f"Layout Candidate {index:02d}",
+                        "email": f"layout-{index:02d}@example.test",
+                        "ai_status": "Failed",
+                        "evaluation": None,
+                        "demo_fixture": False,
+                    }
+                    for index in range(count)
+                ],
+            }
+            page.goto(f"{base}/hr/jobs/{requirement_id}/candidates")
+            region = page.get_by_role("region", name="Candidate records", exact=True)
+            expect(region.locator("tbody tr")).to_have_count(count)
+            expect(region.get_by_role("button", name="Retry evaluation", exact=True)).to_have_count(count)
+            # Wait for ResizeObserver measurement; assert the cap contains the
+            # entire sixth row rather than merely an arbitrary viewport slice.
+            page.wait_for_function(
+                """count => {
+                    const r = document.querySelector('[aria-label="Candidate records"]');
+                    const rows = r?.querySelectorAll('tbody tr');
+                    if (!r || rows?.length !== count || r.scrollTop !== 0) return false;
+                    if (count <= 6) return !r.style.maxHeight && r.scrollHeight <= r.clientHeight + 1;
+                    const bottom = r.getBoundingClientRect().top + r.clientTop + r.clientHeight;
+                    return !!r.style.maxHeight && r.scrollHeight > r.clientHeight + 20 &&
+                        rows[5].getBoundingClientRect().bottom <= bottom + 2 &&
+                        rows[6].getBoundingClientRect().top >= bottom - 3;
+                }""",
+                arg=count,
+            )
+            assert page.evaluate("document.documentElement.scrollHeight > window.innerHeight + 50")
+            page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+            page.wait_for_function("window.scrollY > 0")
+            if count > 6:
+                region.evaluate("element => { element.scrollTop = 100; }")
+                page.wait_for_function(
+                    """() => {
+                        const r = document.querySelector('[aria-label="Candidate records"]');
+                        const header = r.querySelector('th');
+                        return r.scrollTop > 0 && getComputedStyle(header).position === 'sticky' &&
+                            Math.abs(header.getBoundingClientRect().top - r.getBoundingClientRect().top) < 3;
+                    }"""
+                )
+        for viewport in ({"width": 1440, "height": 768}, {"width": 390, "height": 844}):
+            page.set_viewport_size(viewport)
+            page.goto(f"{base}/jobs/{requirement_id}")
+            overview = page.locator(".role-summary dl")
+            expect(overview.locator(":scope > div")).to_have_count(9)
+            assert overview.evaluate("element => element.scrollHeight <= element.clientHeight + 1"), "Role overview must show all fields without a nested scrollbar"
+            assert page.evaluate("document.documentElement.scrollHeight > window.innerHeight + 50")
+    finally:
+        page.unroute(candidates_path, candidates_route)
+        page.unroute(job_path, job_route)
+        page.set_viewport_size({"width": 1440, "height": 1000})
+
+
 def main():
     settings = get_settings()
     assert settings.hr_username and settings.hr_password, "Set HR_USERNAME and HR_PASSWORD for the running demo API and smoke process"
@@ -107,33 +199,13 @@ def main():
         downloaded = context.request.get(f"{base}/api/hr/applications/{application_id}/resume")
         assert downloaded.ok and downloaded.body() == resume_path.read_bytes()
 
-        # Long descriptions must scroll within the card without extending the
-        # document or moving the apply action outside the desktop viewport.
-        long_job = context.request.get(f"{base}/api/jobs/{requirement_id}").json()
-        long_job["description"] = "\n\n".join(
-            f"{index + 1}. Fictional requirement: build accessible business applications."
-            for index in range(200)
-        )
-        job_route = f"**/api/jobs/{requirement_id}"
-        page.route(job_route, lambda route: route.fulfill(json=long_job))
-        page.set_viewport_size({"width": 1440, "height": 900})
-        page.goto(f"{base}/jobs/{requirement_id}")
-        description = page.get_by_role("article", name="Job description")
-        expect(description).to_be_visible()
-        assert description.evaluate("element => element.scrollHeight > element.clientHeight + 500")
-        description.focus()
-        description.press("End")
-        page.wait_for_function("document.querySelector('.job-description').scrollTop > 0")
-        assert page.evaluate("document.documentElement.scrollHeight <= innerHeight + 1")
-        expect(page.get_by_role("link", name="Sign in with LinkedIn to apply")).to_be_in_viewport()
-        page.unroute(job_route)
+        verify_collection_layout(page, base, requirement_id, candidate, jobs[0])
 
         # Responsive navigation should remain usable without horizontal overflow.
         page.set_viewport_size({"width": 390, "height": 844})
         page.goto(f"{base}/hr")
         expect(page.get_by_role("button", name="Open navigation")).to_be_visible()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
-        assert page.evaluate("document.documentElement.scrollHeight <= window.innerHeight + 1")
         assert not js_errors, f"Browser errors: {js_errors}"
         print(
             json.dumps(
@@ -149,7 +221,8 @@ def main():
                         "HR authorization",
                         "candidate evidence",
                         "private resume download",
-                        "bounded description and visible apply action",
+                        "full failed-candidate rows and six-record scroll cap",
+                        "natural document scrolling and complete role overview",
                         "mobile layout",
                         "no browser exceptions",
                     ],

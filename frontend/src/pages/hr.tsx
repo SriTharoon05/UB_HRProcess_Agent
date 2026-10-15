@@ -58,6 +58,7 @@ import {
   StatusBadge,
 } from "../components/common";
 import { Button } from "../components/ui/button";
+import { RecordScroll } from "../components/record-scroll";
 import { Dialog } from "../components/ui/dialog";
 
 function RetryEvaluationButton({ requirementId, applicationId }: { requirementId: string; applicationId: string }) {
@@ -315,7 +316,7 @@ export function HRDashboardPage() {
             />
           ) : recent.length ? (
             <div className="card recent-candidate-card">
-              <div className="table-scroll scroll-region" role="region" aria-label="Recent candidates" tabIndex={0}>
+              <RecordScroll label="Recent candidates" className="table-scroll">
                 <table className="recent-table">
                   <thead>
                     <tr>
@@ -385,7 +386,7 @@ export function HRDashboardPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </RecordScroll>
             </div>
           ) : (
             <EmptyState
@@ -609,7 +610,7 @@ export function HRJobsPage() {
       (!department || department === job.department),
   );
   return (
-    <div className="page page-records">
+    <div className="page">
       <PageHeading
         eyebrow="RECRUITMENT OPPORTUNITIES"
         title="Great teams begin with a role."
@@ -654,8 +655,8 @@ export function HRJobsPage() {
           }}
         />
       ) : jobs.length ? (
-        <div className="card jobs-table-card record-card">
-          <div className="table-scroll scroll-region" role="region" aria-label="Job requirements" tabIndex={0}>
+        <div className="card jobs-table-card">
+          <RecordScroll label="Job requirements" className="table-scroll" resetKey={JSON.stringify([search, department])}>
             <table>
               <thead>
                 <tr>
@@ -707,7 +708,7 @@ export function HRJobsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </RecordScroll>
           <div className="table-footer">
             <span>
               {jobs.length} {jobs.length === 1 ? "requirement" : "requirements"}
@@ -768,7 +769,7 @@ export function CandidateRankingPage() {
       (!status || item.ai_status === status),
   );
   return (
-    <div className="page page-records ranking-page">
+    <div className="page">
       <Breadcrumbs
         items={[
           { label: "Job requirements", to: "/hr/jobs" },
@@ -892,8 +893,8 @@ export function CandidateRankingPage() {
           }}
         />
       ) : candidates.length ? (
-        <div className="card candidates-table-card record-card">
-          <div className="table-scroll scroll-region" role="region" aria-label="Candidate records" tabIndex={0}>
+        <div className="card candidates-table-card">
+          <RecordScroll label="Candidate records" className="table-scroll" resetKey={JSON.stringify([search, match, status, descending])}>
             <table className="candidates-table">
               <thead>
                 <tr>
@@ -981,7 +982,7 @@ export function CandidateRankingPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </RecordScroll>
           <div className="table-footer">
             <span>
               Showing {candidates.length} of {query.data?.returned_count}{" "}
@@ -1130,7 +1131,7 @@ export function CandidateDetailPage() {
     },
   ];
   return (
-    <div className="page page-evaluation">
+    <div className="page">
       <Breadcrumbs
         items={[
           { label: "Requirements", to: "/hr/jobs" },
@@ -1149,65 +1150,63 @@ export function CandidateDetailPage() {
       <HumanReviewNotice />
       <div className="evaluation-grid">
         <aside className="candidate-profile card">
-          <div className="candidate-profile-content scroll-region" role="region" aria-label="Candidate information" tabIndex={0}>
-            <div className="profile-top">
-              <Avatar name={candidate.candidate_name} size="lg" color={1} />
-              <h2>{candidate.candidate_name}</h2>
-              <span>Candidate for</span>
-              <strong>{candidate.job_title || candidate.requirement_id}</strong>
-              {candidate.demo_fixture && (
-                <Badge tone="orange">
-                  <Sparkles size={11} />
-                  Fictional demo profile
-                </Badge>
-              )}
-            </div>
-            <div className="profile-contact">
-              <a href={`mailto:${candidate.email}`}>
-                <Mail size={15} />
-                {candidate.email}
-              </a>
-              {linkedIn && (
-                <a href={linkedIn} target="_blank" rel="noopener noreferrer">
-                  <Linkedin size={15} />
-                  LinkedIn profile
-                  <ExternalLink size={12} />
-                </a>
-              )}
-            </div>
-            <dl className="profile-details">
-              <div>
-                <dt>Application reference</dt>
-                <dd className="mono">{candidate.application_id}</dd>
-              </div>
-              <div>
-                <dt>Candidate reference</dt>
-                <dd className="mono">{candidate.candidate_id}</dd>
-              </div>
-              <div>
-                <dt>Applied on</dt>
-                <dd>{dateLabel(candidate.applied_date)}</dd>
-              </div>
-              <div>
-                <dt>Application status</dt>
-                <dd>
-                  <StatusBadge status={candidate.hr_status} />
-                </dd>
-              </div>
-              <div>
-                <dt>AI processing</dt>
-                <dd>
-                  <StatusBadge status={candidate.ai_status} />
-                </dd>
-              </div>
-              {candidate.evaluation_date && (
-                <div>
-                  <dt>Evaluated on</dt>
-                  <dd>{dateLabel(candidate.evaluation_date)}</dd>
-                </div>
-              )}
-            </dl>
+          <div className="profile-top">
+            <Avatar name={candidate.candidate_name} size="lg" color={1} />
+            <h2>{candidate.candidate_name}</h2>
+            <span>Candidate for</span>
+            <strong>{candidate.job_title || candidate.requirement_id}</strong>
+            {candidate.demo_fixture && (
+              <Badge tone="orange">
+                <Sparkles size={11} />
+                Fictional demo profile
+              </Badge>
+            )}
           </div>
+          <div className="profile-contact">
+            <a href={`mailto:${candidate.email}`}>
+              <Mail size={15} />
+              {candidate.email}
+            </a>
+            {linkedIn && (
+              <a href={linkedIn} target="_blank" rel="noopener noreferrer">
+                <Linkedin size={15} />
+                LinkedIn profile
+                <ExternalLink size={12} />
+              </a>
+            )}
+          </div>
+          <dl className="profile-details">
+            <div>
+              <dt>Application reference</dt>
+              <dd className="mono">{candidate.application_id}</dd>
+            </div>
+            <div>
+              <dt>Candidate reference</dt>
+              <dd className="mono">{candidate.candidate_id}</dd>
+            </div>
+            <div>
+              <dt>Applied on</dt>
+              <dd>{dateLabel(candidate.applied_date)}</dd>
+            </div>
+            <div>
+              <dt>Application status</dt>
+              <dd>
+                <StatusBadge status={candidate.hr_status} />
+              </dd>
+            </div>
+            <div>
+              <dt>AI processing</dt>
+              <dd>
+                <StatusBadge status={candidate.ai_status} />
+              </dd>
+            </div>
+            {candidate.evaluation_date && (
+              <div>
+                <dt>Evaluated on</dt>
+                <dd>{dateLabel(candidate.evaluation_date)}</dd>
+              </div>
+            )}
+          </dl>
           <Button
             className="full-width"
             variant="secondary"
@@ -1224,7 +1223,7 @@ export function CandidateDetailPage() {
             Authorized access only
           </p>
         </aside>
-        <div className="evaluation-main scroll-region" role="region" aria-label="Evaluation details" tabIndex={0}>
+        <div className="evaluation-main">
           {evaluation ? (
             <>
               <section className="card evaluation-summary">
@@ -1311,36 +1310,37 @@ export function CandidateDetailPage() {
                   ))}
                 </div>
                 <div
-                  className="evidence-tab-panel scroll-region"
-                  tabIndex={0}
+                  className="evidence-tab-panel"
                   role="tabpanel"
                   id={`panel-${tab}`}
                   aria-labelledby={`tab-${tab}`}
                 >
-                  {tab === "matched" && (
-                    <EvidenceList
-                      items={evaluation.matched_requirements}
-                      tone="matched"
-                      empty="No requirements are fully supported in this evaluation."
-                    />
-                  )}
-                  {tab === "partial" && (
-                    <EvidenceList
-                      items={evaluation.partially_matched_requirements}
-                      tone="partial"
-                      empty="No partially supported requirements were identified."
-                    />
-                  )}
-                  {tab === "missing" && (
-                    <GapList items={evaluation.not_evidenced_requirements} />
-                  )}
-                  {tab === "evidence" && (
-                    <EvidenceList
-                      items={evaluation.relevant_evidence}
-                      tone="evidence"
-                      empty="No additional supporting evidence was included."
-                    />
-                  )}
+                  <RecordScroll label="Evaluation evidence records" layout="evidence" resetKey={tab}>
+                    {tab === "matched" && (
+                      <EvidenceList
+                        items={evaluation.matched_requirements}
+                        tone="matched"
+                        empty="No requirements are fully supported in this evaluation."
+                      />
+                    )}
+                    {tab === "partial" && (
+                      <EvidenceList
+                        items={evaluation.partially_matched_requirements}
+                        tone="partial"
+                        empty="No partially supported requirements were identified."
+                      />
+                    )}
+                    {tab === "missing" && (
+                      <GapList items={evaluation.not_evidenced_requirements} />
+                    )}
+                    {tab === "evidence" && (
+                      <EvidenceList
+                        items={evaluation.relevant_evidence}
+                        tone="evidence"
+                        empty="No additional supporting evidence was included."
+                      />
+                    )}
+                  </RecordScroll>
                 </div>
               </section>
               <div className="evaluation-provenance">

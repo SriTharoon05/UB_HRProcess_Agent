@@ -1,0 +1,41 @@
+/* Natural document flow: only growing collections get an internal scrollbar. */
+.record-scroll {
+  position: relative;
+  max-width: 100%;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #91b6c9 #edf4f8;
+}
+
+.record-scroll:focus-visible {
+  outline-offset: -3px;
+}
+
+.record-scroll th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f5f9fc;
+  box-shadow: inset 0 -1px #dce7ef;
+}
+
+.job-results > .job-grid {
+  align-content: start;
+  padding: 4px 4px 12px;
+}
+
+.details-grid,
+.evaluation-grid {
+  align-items: start;
+}
+
+/* A generous reading panel for very long JDs; the overview stays fully open. */
+.job-description {
+  max-height: 900px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #91b6c9 #edf4f8;
+}
