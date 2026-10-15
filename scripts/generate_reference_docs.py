@@ -7,7 +7,9 @@ contains python-docx. The output contains fictional screenshots and no secrets.
 from __future__ import annotations
 
 import re
+import os
 from pathlib import Path
+from urllib.parse import urlsplit
 from zipfile import ZipFile
 
 from docx import Document
@@ -23,7 +25,11 @@ VIOLET = "6651C7"
 INK = "28243C"
 MUTED = "625C76"
 PALE = "F0ECFB"
-REPO = "https://github.com/SriTharoon05/UB_HRProcess_Agent/blob/main/"
+REPO = os.environ.get("DOCUMENTATION_REPOSITORY_URL", "https://github.com/SriTharoon05/UB_HRProcess_Agent/blob/main/").rstrip("/") + "/"
+repository_url = urlsplit(REPO)
+if (repository_url.scheme != "https" or repository_url.hostname != "github.com"
+        or repository_url.username or repository_url.password or repository_url.query or repository_url.fragment):
+    raise ValueError("DOCUMENTATION_REPOSITORY_URL must be a GitHub HTTPS source URL without credentials")
 
 
 def shade(cell, fill):

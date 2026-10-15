@@ -20,8 +20,8 @@ cat > "$target/Docker instructions.md" <<'GUIDE'
 Start with [Docker setup and transfer instructions](docs/docker-local.md).
 
 - [Supabase migration and environment settings](docs/supabase.md)
-- [Technical reference (Word)](docs/reference/TalentMatch_AI_Technical_Reference.docx)
-- [Business reference (Word)](docs/reference/TalentMatch_AI_Business_Reference.docx)
+- [Technical reference (Word)](docs/reference/AI-Powered%20HR%20Recruitment%20Process%20Using%20D365%20-%20Technical%20Document.docx)
+- [Business reference (Word)](docs/reference/AI-Powered%20HR%20Recruitment%20Process%20Using%20D365-%20Business%20Document.docx)
 
 Put your private .env beside compose.yml. Run setup.cmd once on Windows or ./setup.sh on Linux/macOS.
 After initial setup, use Docker Desktop > Containers > talentmatch > Play.

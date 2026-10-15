@@ -1,6 +1,6 @@
 # TalentMatch AI — business reference
 
-Document version: Phase 1 management handoff, 15 October 2026. Audience: HR leadership, business sponsors, ERP stakeholders, and project reviewers. The companion Word document is [TalentMatch_AI_Business_Reference.docx](reference/TalentMatch_AI_Business_Reference.docx).
+Document version: Phase 1 management handoff, 15 October 2026. Audience: HR leadership, business sponsors, ERP stakeholders, and project reviewers. The companion Word document is [Business Word document](reference/AI-Powered%20HR%20Recruitment%20Process%20Using%20D365-%20Business%20Document.docx).
 
 ## 1. Executive overview
 

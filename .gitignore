@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 !.env.*.example
+*.env
+appsettings.*.json
+!appsettings.example.json
+private-appsettings.json
 *.pem
 *.key
 backend/data/

@@ -12,6 +12,8 @@ The complete stack runs at **https://localhost:7242**. The LinkedIn callback is 
 https://localhost:7242/auth/linkedin/callback
 ```
 
+For hosted Azure deployment, use the separate [single-container ACR/App Service guide](docs/azure-app-service.md) and [IT resource request](docs/azure-it-request.md). `Dockerfile.azure` runs the web/API/ARQ/Redis processes in one non-root container. Azure uses the final public HTTPS hostname for LinkedIn; local Compose remains on port 7242. Company GitHub publishing is an explicit user step, and CI/CD stays disabled until company repository/identity variables are configured.
+
 Docker Compose groups the HTTPS frontend gateway, API, worker and Redis under **talentmatch**. API/Redis ports are internal. After initial setup, Docker Desktop **Containers → talentmatch → Play** starts the existing group with one action.
 
 From the source repository in PowerShell:
@@ -37,9 +39,10 @@ See [complete Docker setup, transfer and troubleshooting](docs/docker-local.md).
 
 | Guide | Purpose |
 | --- | --- |
-| [Technical reference](docs/technical-reference.md) · [Word document](docs/reference/TalentMatch_AI_Technical_Reference.docx) | Architecture, processing flow, ERP mapping, AI validation, deployment, operations, limitations and roadmap |
-| [Business reference](docs/business-reference.md) · [Word document](docs/reference/TalentMatch_AI_Business_Reference.docx) | Phase 1 business journey, value, governance, responsibilities, pilot criteria and future phases |
+| [Technical reference](docs/technical-reference.md) · [Word document](docs/reference/AI-Powered%20HR%20Recruitment%20Process%20Using%20D365%20-%20Technical%20Document.docx) | Architecture, processing flow, ERP mapping, AI validation, deployment, operations, limitations and roadmap |
+| [Business reference](docs/business-reference.md) · [Word document](docs/reference/AI-Powered%20HR%20Recruitment%20Process%20Using%20D365-%20Business%20Document.docx) | Phase 1 business journey, value, governance, responsibilities, pilot criteria and future phases |
 | [Local Docker handoff](docs/docker-local.md) | One-group startup, image export/import, certificates, recipient setup and data boundaries |
+| [Azure App Service / CI/CD](docs/azure-app-service.md) · [IT request](docs/azure-it-request.md) | Single-container ACR deployment, company GitHub setup, Foundry requirements and public callback |
 | [Supabase migration](docs/supabase.md) | Optional PostgreSQL configuration, consistent SQLite migration, shared coordination and rollback |
 | [Environment reference](docs/environment.md) | Runtime settings, provider credentials and storage options |
 | [Architecture](docs/architecture.md) · [API](docs/api-contract.md) | Data ownership and frontend/backend contracts |
@@ -47,7 +50,7 @@ See [complete Docker setup, transfer and troubleshooting](docs/docker-local.md).
 | [Authentication](docs/linkedin-auth.md) · [AI behavior](docs/azure-openai.md) | LinkedIn selected-job return, HR sign-in and evidence validation |
 | [Operations](docs/deployment.md) · [Debugging](docs/debugging.md) · [Validation record](docs/validation.md) | Rollout, backups, recovery, terminal stages and executed verification |
 
-The Word documents are generated from the Markdown references by `scripts/generate_reference_docs.py`. Screenshots use fictional demo identities and explicitly labeled sample evaluations.
+The maintained Word documents include manual edits. `scripts/generate_reference_docs.py` creates separate drafts from the Markdown references; it does not merge or preserve manual Word edits. Screenshots use fictional demo identities and explicitly labeled sample evaluations.
 
 ![Candidate application form with fictional demo identity](docs/screenshots/phase1-candidate-application.png)
 

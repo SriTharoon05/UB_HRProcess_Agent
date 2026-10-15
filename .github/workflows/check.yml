@@ -2,6 +2,7 @@ name: Verify application
 on:
   push:
   pull_request:
+  workflow_dispatch:
 jobs:
   check:
     runs-on: ubuntu-latest

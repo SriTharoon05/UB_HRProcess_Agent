@@ -4,7 +4,7 @@ This record distinguishes executed local checks from external integration accept
 
 | Check | Result |
 | --- | --- |
-| Complete backend suite | **325 passed**, including real Redis and local PostgreSQL integration tests; no tests skipped in the complete run |
+| Complete backend suite | **338 passed**, including real Redis, local PostgreSQL integration tests and the Azure runtime checks; no tests skipped in the latest complete run |
 | PostgreSQL / migration checks | Shared SQLite/PostgreSQL storage contract, concurrent reservation, company/owner scope, immutable snapshots, private RLS schema, cross-process evaluation locks, cancellation cleanup, source-only dry run, idempotent import, unchanged source and atomic conflict rollback passed |
 | PostgreSQL evaluation workflow | Real PostgreSQL with controlled AI/D365 responses: acknowledged submission, validated result caching, failed save, retry and matching completion passed |
 | Frontend suite | **73 passed**, including HR retry/refresh and candidate processing-status privacy |
@@ -19,6 +19,16 @@ This record distinguishes executed local checks from external integration accept
 | Visual review | Eleven desktop/mobile route screenshots inspected at 1440 px and 390 px; no page overflow or JavaScript exceptions; heading, mobile hero and text readability defects corrected |
 | Word documents | Both DOCX archives reopened; document XML, headings, tables, links and two embedded fictional screenshots per document checked |
 | Documentation | Relative Markdown links, shell syntax, generator lint and whitespace checks passed |
+
+## Azure single-container verification
+
+The separate `Dockerfile.azure` image built successfully for Linux/amd64. Its Nginx, FastAPI, ARQ and Redis processes were checked together. The fictional browser workflow passed through the built image: job browsing, candidate sign-in, PDF submission, owned history, HR login, evidence and private resume download, including mobile navigation without browser exceptions.
+
+Production-mode checks used a real local PostgreSQL server with certificate-verified TLS. Readiness verified the API, Redis and worker heartbeat. A simulated App Service HTTPS edge checked secure HttpOnly cookies, CSRF-protected HR login, role boundaries and SPA deep links. The final image runs as UID 10001; application code is not writable by that user and application-settings JSON is absent from the image.
+
+The 13 Azure runtime tests passed within the complete backend suite. Ruff, TypeScript/Vite image build, workflow YAML parsing and workflow shell syntax checks passed. Markdown-derived Word drafts were generated and their package structure checked. On synchronizing with the remote repository, the user-edited, renamed Word documents were preserved unchanged and documentation/export links were updated to those maintained files. A first full-suite attempt exhausted this workspace's build-cache disk space; after removing regenerable Docker build cache, the complete run passed with **338 tests**.
+
+No company GitHub push, company workflow execution, Azure provisioning or live Azure deployment was performed. App Service TLS termination and managed identity, registry image pulls, company network access, Key Vault references, live model output and the final LinkedIn callback require acceptance in the provisioned Azure environment. Local edge simulation does not replace those checks.
 
 ## Verification boundaries
 

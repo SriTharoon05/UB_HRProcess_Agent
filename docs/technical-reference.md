@@ -1,6 +1,6 @@
 # TalentMatch AI — technical reference
 
-Document version: Phase 1 deployment handoff, 15 October 2026. Audience: developers, ERP administrators, infrastructure operators, and technical reviewers. The companion Word document is [TalentMatch_AI_Technical_Reference.docx](reference/TalentMatch_AI_Technical_Reference.docx).
+Document version: Phase 1 deployment handoff, 15 October 2026. Audience: developers, ERP administrators, infrastructure operators, and technical reviewers. The companion Word document is [Technical Word document](reference/AI-Powered%20HR%20Recruitment%20Process%20Using%20D365%20-%20Technical%20Document.docx).
 
 ## 1. Scope and implementation status
 
@@ -19,11 +19,14 @@ The current release is a Phase 1 application with deployment tooling and operati
 | Failed evaluation recovery | HR retry and refresh; cached valid AI result reused for save-only retries |
 | Portal metadata | SQLite by default; optional PostgreSQL/Supabase adapter and explicit migration |
 | Local packaging | HTTPS localhost Docker Compose group with gateway, API, worker, and Redis |
+| Azure packaging | Separate ACR/App Service single-container image, Supervisor, public same-origin HTTPS, OIDC-gated company GitHub CI/CD |
 | Future lifecycle | Screening, interviews, offers, onboarding, and employee maintenance remain roadmap |
 
 ## 2. System architecture
 
 A same-origin HTTPS gateway serves the built React assets and forwards `/api` and `/auth` to FastAPI. Docker publishes only `127.0.0.1:7242`. The browser opens `https://localhost:7242`; the registered LinkedIn callback remains `https://localhost:7242/auth/linkedin/callback`. The backend listens on HTTP port 8000 inside the Docker network. Internal HTTP does not change the browser-visible callback.
+
+That description applies to the local Compose package. The separate Azure image uses App Service's public HTTPS termination, Nginx on internal port 8080, and the final public hostname for its LinkedIn callback. It packages API, ARQ and Redis under Supervisor; durable metadata is PostgreSQL and resumes stay in private Blob. See [Azure hosting and company CI/CD](azure-app-service.md) and [the IT request](azure-it-request.md). Its GitHub workflow is explicitly gated and does not publish to a company account automatically.
 
 | Component | Responsibility | Persistence or external dependency |
 | --- | --- | --- |
