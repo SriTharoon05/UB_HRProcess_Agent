@@ -1,6 +1,6 @@
 # Three-operation D365 contract
 
-The current source pack targets the user's existing model `UBHR_Nive` and tables `UBJobRequirementTable`, `UBCandidateTable`, `UBJobApplicationTable`, `UBHRMatchEvaluationTable`. Follow the [Visual Studio paste guide](../d365/README.md). The default connected adapter is `D365_CONTRACT_MODE=sqlite`: it calls F&O for jobs, application submission and core AI persistence, while portal metadata/history/ranking remain in SQLite.
+The current source pack targets the user's existing model `UBHR_Nive` and tables `UBJobRequirementTable`, `UBCandidateTable`, `UBJobApplicationTable`, `UBHRMatchEvaluationTable`. Follow the [Visual Studio paste guide](../d365/README.md). The default connected adapter is `D365_CONTRACT_MODE=sqlite`: it calls F&O for jobs, application submission and core AI persistence, while portal metadata/history/ranking use the selected SQLite or PostgreSQL engine. `D365_CONTRACT_MODE=sqlite` is the compatible ERP contract name even with `METADATA_BACKEND=postgres`.
 
 React calls FastAPI `/api` and `/auth`; **all D365 settings go in `backend/.env`**. Use the deployed F&O origin in `D365_BASE_URL` and configure these relative POST paths:
 
@@ -118,7 +118,7 @@ The backend derives one stable EvaluationId from the ApplicationId and saves the
 }
 ```
 
-The backend requires matching ApplicationId/EvaluationId before exposing the confirmed result. Retries reuse the ID; a save failure remains pending/failed locally and does not claim F&O completion. Score justification, partial evidence, confidence, model/prompt/rubric versions and evaluated time remain in SQLite, so no extra evaluation columns are required.
+The backend requires matching ApplicationId/EvaluationId before exposing the confirmed result. Retries reuse the ID; a save failure remains pending/failed locally and does not claim F&O completion. Score justification, confidence, model/prompt/rubric versions and evaluated time remain in portal metadata; matched and partial evidence are included in ERP evidence payloads, so no extra evaluation columns are required.
 
 ## SQLite reads and acceptance
 
@@ -127,3 +127,5 @@ Portal detail, candidate-owned history and job-specific HR ranking read only ack
 The API and worker must use the same durable SQLite file, Redis namespace and private Blob container. `RETENTION_DAYS` does not erase SQLite business metadata automatically. See [schema](d365-schema.md) and [deployment](deployment.md) for persistence and backup limits.
 
 Use the [three-operation Postman collection](../d365/UBHRPortal.postman_collection.json) for serialized F&O checks. Use the portal and a real synthetic upload for the full workflow: direct fixture calls do not populate SQLite or create private documents. X++ compilation, existing enum/EDT compatibility, dedicated-user security, legal-entity scope, duplicate retries and live AI/Blob persistence remain F&O/deployment acceptance checks.
+
+The user's `Summary`, `MatchedSkillsJson`, `MissingSkillsJson` and `EvidenceJson` fields are Memo. The deployed service must accept their actual text metadata without a short-string-only check. Keep the existing response contract and stable supplied EvaluationId; a standalone method returning only a new string ID is not compatible with the portal acknowledgement checks.

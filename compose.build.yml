@@ -1,0 +1,11 @@
+# Only developers need this file and source code. The transfer bundle omits it.
+services:
+  api:
+    build:
+      context: ./backend
+  worker:
+    build:
+      context: ./backend
+  web:
+    build:
+      context: ./frontend

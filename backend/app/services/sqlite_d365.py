@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.errors import IntegrationError
-from app.metadata import SQLiteMetadata
+from app.metadata import metadata_store
 from app.models import Candidate, Evaluation, User
 from app.observability import log_event, traced
 from app.services.d365 import D365Service, MEMO_FIELDS, _pascal_evidence
@@ -36,7 +36,7 @@ LEAN_EVALUATION_FIELDS = {"company", "application_id", "requirement_id", "evalua
 class SQLiteD365Service(D365Service):
     def __init__(self, settings, *, metadata=None, **kwargs):
         super().__init__(settings, **kwargs)
-        self.metadata = metadata or SQLiteMetadata(settings.sqlite_database_path)
+        self.metadata = metadata or metadata_store(settings)
 
     @traced("d365.request.mapping")
     def _body(self, operation: str, payload: dict[str, Any]) -> dict:

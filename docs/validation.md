@@ -1,40 +1,35 @@
-# Validation performed
+# Phase 1 verification record
 
-The current screenshot-table/SQLite revision passed the complete repository checks. Browser checks below remain the previously executed demo/authentication scenarios; they do not establish live F&O behavior. X++ build and live F&O acceptance require the development environment.
+This record distinguishes executed local checks from external integration acceptance. Verification used fictional resumes and identities; no live candidate data was uploaded to a provider.
 
 | Check | Result |
 | --- | --- |
-| `scripts/install.sh` | Locked uv installation and clean `npm ci` passed using writable local caches |
-| Backend pytest | 212 passed, including 10 SQLite recovery/integration tests and 8 tests against a real Redis instance |
-| LinkedIn and Entra authentication regressions | 123 passed, including state-bound job return, redirect attacks, standard profile fields, invalid member-ID email, optional contacts, token validation, strict Entra nonce checks, and safe diagnostics |
-| Backend Ruff | Passed |
-| Frontend Vitest | 68 passed across 4 test files |
-| Frontend ESLint and TypeScript | Passed |
-| Vite production build | Passed; candidate and HR screens load in separate chunks |
-| Backend and frontend Docker builds | Revised Python 3.12 backend build passed; frontend Docker build passed during the baseline validation |
-| Shared container SQLite persistence | Passed: UID 10001 initialized the database and a fresh non-root container read the same persistent volume |
-| Demo browser smoke | Passed against the development server and built API/nginx containers |
-| Selected-job LinkedIn browser flow | Passed with real Authlib state handling and RSA ID-token validation; provider network responses mocked, three 303 callbacks restored selected-job/form/query/fragment |
-| Visual checks | Desktop 1440px and mobile 390px; navigation works and tables scroll within their containers |
-| Saved startup commands | Services stopped and restarted successfully through `scripts/dev.sh` |
-| Current three-operation D365/SQLite bundle | Passed: exact screenshot field references, five DTOs, six fixtures, three actual mocked adapter calls, SQLite restart and Postman routes |
-| Legacy D365 adapter regression | 13 passed in the current complete test run; legacy adapter retained |
-| X++ build/database synchronization | Not executed; requires an F&O development environment |
+| Complete backend suite | **325 passed**, including real Redis and local PostgreSQL integration tests; no tests skipped in the complete run |
+| PostgreSQL / migration checks | Shared SQLite/PostgreSQL storage contract, concurrent reservation, company/owner scope, immutable snapshots, private RLS schema, cross-process evaluation locks, cancellation cleanup, source-only dry run, idempotent import, unchanged source and atomic conflict rollback passed |
+| PostgreSQL evaluation workflow | Real PostgreSQL with controlled AI/D365 responses: acknowledged submission, validated result caching, failed save, retry and matching completion passed |
+| Frontend suite | **73 passed**, including HR retry/refresh and candidate processing-status privacy |
+| Static checks and build | Backend Ruff, frontend ESLint, TypeScript and Vite production build passed |
+| ERP source bundle | Field references, five DTOs, six fixtures, three actual mocked adapter calls, SQLite reopen and Postman routes passed |
+| Runtime image builds | Backend and HTTPS frontend/gateway built successfully; final backend image file hashes match the final application sources |
+| Source-free transfer | Exported approximately 440 MB image archive; checksum, import, image platform, Word documents and absence of source, credentials, certificates and private data checked |
+| Local HTTPS | Generated machine-specific certificate verified against its CA and localhost hostname; only host port 127.0.0.1:7242 published |
+| Production container mode | Redis, API, worker and web healthy; HTTPS health, secure HttpOnly session cookies, CSRF HR login, SPA deep routes and security headers checked |
+| Container browser workflow | Built HTTPS gateway: job listing, candidate demo sign-in, generated PDF upload, entered contact details, owned history, HR authorization/password login, evidence display, exact private resume download, mobile navigation and no browser exceptions passed |
+| Restart behavior | Stopped and restarted the existing four production containers, including starting gateway/worker before dependencies; API HTTPS request succeeded and all services returned healthy |
+| Visual review | Eleven desktop/mobile route screenshots inspected at 1440 px and 390 px; no page overflow or JavaScript exceptions; heading, mobile hero and text readability defects corrected |
+| Word documents | Both DOCX archives reopened; document XML, headings, tables, links and two embedded fictional screenshots per document checked |
+| Documentation | Relative Markdown links, shell syntax, generator lint and whitespace checks passed |
 
-The user's subsequent Visual Studio build reported combined locking hints and a reserved `index` local in the portal class. Both are corrected in the source. Targeted guards passed four valid and four invalid syntax-pattern cases; bundle checks and the 23 SQLite/legacy D365 adapter tests passed after the correction. [build-errors.md](../d365/build-errors.md) maps the stale field references in the user's existing application service/form. Those external AOT objects are not in this repository; their bindings must be changed in Visual Studio. The revised class still requires an actual F&O build.
+## Verification boundaries
 
-The browser scenario submits a newly generated PDF through the candidate application form, verifies its entered contact name/email, current application identifier and candidate history, checks candidate-to-HR access denial, switches to HR, opens the evaluation, and downloads the exact original PDF. It also checks mobile layout and browser exceptions. Sample evaluations remain labeled fictional fixtures. The contact-field regression was rerun against the development services; container smoke checks were performed during the initial build.
+The production-mode local container checks do not call live LinkedIn, D365, Azure OpenAI, Azure Blob or Supabase. Provider calls in automated workflows are controlled responses, while Redis and PostgreSQL persistence are real. The user has separately reported their native connected Phase 1 flow working; this does not replace acceptance testing of a new container deployment with its actual authorized settings.
 
-The selected-job browser check uses isolated test services and a fictional LinkedIn identity. It exercises the complete signed callback, profile summary, empty email when a member URN is returned, manual contact entry, real PDF upload, consent, candidate-owned history, and HR denial. Desktop 1440px and mobile 390px checks found no page overflow or browser exceptions. [Desktop](screenshots/linkedin-profile-desktop.png) and [mobile](screenshots/linkedin-profile-mobile.png) screenshots use fictional data; this does not establish a live LinkedIn/D365/AI deployment.
+The browser container smoke uses the explicit fictional demo override. HTTPS requests verify the generated local CA; Chromium is restricted to the generated leaf public-key pin for this isolated check. No global TLS verification was disabled. A recipient must install their own machine-local trust using setup before using LinkedIn.
 
-Backend tests validate signed OIDC tokens, state/nonce/issuer/audience/expiry handling, roles, CSRF, ownership, session revocation races, upload validation, real document extraction, D365 mappings, AI output/evidence validation, and durable queue recovery. External D365, identity-provider, Azure OpenAI, and Blob calls are mocked. Real Redis tests verify queue retention, recovery, cached evaluation retries, idempotency, and session updates.
+Docker builds and runtime verification executed on Linux/amd64. Windows PowerShell and macOS trust steps are provided and reviewed but were not executed on those operating systems. Linux group stop/start was tested; Docker Desktop's graphical button itself was not available in this environment. After initial setup creates the Compose group, that group is the unit to start.
 
-## External integration status
+No LibreOffice/Word renderer was installed; DOCX package structure and content were checked, but rendered pagination was not verified. X++ compilation, AOT field/index compatibility, database synchronization and deployment still require an F&O development environment. The repository now includes the four confirmed Memo-field validation correction supplied in chat.
 
-No live D365, LinkedIn, Entra, Azure OpenAI, or Azure Blob credentials were provided during this build. Their adapters are implemented and tested with mocks; live provider behavior and deployment permissions remain unverified.
+Current application history and ranking reflect acknowledged portal metadata snapshots; they do not automatically synchronize all historic ERP records or subsequent ERP-only recruiter status changes. Database migration does not move Blob bytes, Redis sessions or ERP data. Shared PostgreSQL has an additional evaluation lock, but an initial multi-machine rollout should still use one active stack or explicitly shared Redis/prefix and Blob configuration.
 
-The current [D365 source bundle](../d365/README.md) provides five contracts and `UBHRPortalService` for exactly three operations under `UBHRPortalServiceGroup/UBHRPortalService`. It uses the four existing screenshot tables in model `UBHR_Nive` and proposes no new tables/columns/EDTs/enums. The default `sqlite` adapter stores complete portal metadata and validated evaluations locally; F&O stores the selected core business values.
-
-X++ compilation, existing EDT/enum compatibility, database synchronization for any index/EDT changes, live serializer/security acceptance and deployment remain unexecuted. The documented default endpoint paths are source-pack paths, not verified deployed services. History/ranking are local acknowledged snapshots and do not establish live F&O recruiter-status synchronization. The SQLite file must be shared durably by API and worker, with tested backup/restore.
-
-GitHub Actions is configured to run tests/builds and the demo browser scenario. Local passing checks do not establish the outcome of a future Actions run, a production deployment, or restoration in a new cloud task.
+These checks support a Phase 1 rollout candidate. They do not establish high availability, an independent security audit, fairness certification, enterprise identity lifecycle, complete retention/erasure automation or future interview/onboarding functionality. Use the documented acceptance checklist with real authorized integrations before wider production rollout.

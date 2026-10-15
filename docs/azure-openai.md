@@ -11,6 +11,7 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
 AZURE_OPENAI_API_VERSION=2025-03-01-preview
 AZURE_OPENAI_PROMPT_VERSION=v1
 AZURE_OPENAI_MAX_RESUME_CHARS=100000
+AZURE_OPENAI_VALIDATION_ATTEMPTS=3
 ```
 
 The supplied deployment/API-version combination is configurable and has not been validated against the live resource in this credential-free build. Confirm that your deployed model and Azure API version support structured outputs and the SDK's `beta.chat.completions.parse` interface. A deployment is an Azure deployment name, which may differ from the underlying model name. If the deployment returns an unsupported-feature error, choose a supported Azure deployment/API version; the application does not downgrade to unvalidated free-form output.
@@ -31,9 +32,9 @@ Structured Pydantic output requires:
 - Not-evidenced requirements with an uncertainty-aware explanation.
 - Supporting resume evidence and High/Medium/Low confidence.
 
-The backend verifies evidence excerpts as exact substrings of both the submitted model text and the original extracted text. A non-empty project name must appear in the supplied resume. A positive score without any supporting evidence is rejected. A syntactically valid quote does not prove the reasoning or resume claims are true: HR must inspect context and verify relevant assertions.
+The backend verifies evidence excerpts as contiguous source quotes in both the submitted model text and original extracted text. Only whitespace-layout differences are normalized; the stored quote is recovered from the original source. A non-empty project name must appear in the supplied resume. A positive score without any supporting evidence is rejected. A syntactically valid quote does not prove the reasoning or resume claims are true: HR must inspect context and verify relevant assertions.
 
-The service does not silently truncate the resume or JD. An extracted resume exceeding `AZURE_OPENAI_MAX_RESUME_CHARS` fails explicitly before the model call; increase that guard only within the actual deployment's supported context. An unreadable/scanned document fails extraction with an OCR explanation. A model refusal, invalid schema, unsupported quote, or context-window/deployment incompatibility becomes a visible evaluation failure rather than an invented score.
+The service does not silently truncate the resume or JD. An extracted resume exceeding `AZURE_OPENAI_MAX_RESUME_CHARS` fails explicitly before the model call; increase that guard only within the actual deployment's supported context. An unreadable/scanned document fails extraction with an OCR explanation. Schema/evidence validation can ask the model to correct its output within `AZURE_OPENAI_VALIDATION_ATTEMPTS` (1–3). Exhausted invalid output, refusal, or deployment/context incompatibility remains an internal failure for HR rather than an invented score; candidate pages do not expose AI diagnostics.
 
 ## Identity minimization
 
@@ -41,12 +42,16 @@ The service removes obvious email addresses, phone numbers, LinkedIn URLs, leadi
 
 ## Worker and persistence
 
-The candidate receives a submission confirmation after D365 confirms an application ID and work is queued. A separate Redis-backed worker processes the document, calls Azure OpenAI, validates the result, and sends it to `saveCandidateEvaluation`. Transient network/throttling/service failures use bounded retries with backoff; deterministic invalid output is reported as failed instead of assigning a fallback score.
+The candidate receives a submission confirmation after D365 confirms an application ID and work is queued. A separate Redis-backed worker processes the document, calls Azure OpenAI, validates the result, and sends it to `saveCandidateEvaluation`. Transient network/throttling/service failures use bounded retries with backoff; invalid schema/evidence gets bounded correction, and exhausted validation is reported to HR instead of assigning a fallback score. A weak match is a valid evaluation when its score/evidence is consistent.
 
-The adapter serializes requirement/evidence collections into the proposed X++ memo JSON strings and attaches deployment/prompt/rubric provenance. A missing save endpoint is a configuration blocker and does not count as a persisted evaluation. Retrying persistence requires the D365 service to upsert one evaluation per application. See [D365 endpoints](d365-endpoints.md).
+The adapter serializes matched and partial requirement evidence, gaps, and relevant evidence into the existing X++ Memo JSON fields. Full assessment and deployment/prompt/rubric provenance remain in the selected metadata database. A missing save endpoint is a configuration blocker and does not count as a persisted evaluation. Retrying persistence requires the D365 service to upsert one evaluation per application. See [D365 endpoints](d365-endpoints.md).
 
 Demo mode selects a separate labeled evaluation fixture and does not invoke this production AI service. Sample values shown in documentation/demo screens are never production fallback scores.
 
 ## Live verification
 
 With authorized credentials, test a readable synthetic resume against a complete job, inspect structured output and quotes, verify D365 persistence/acknowledgement, and check HR detail rendering. Also test unreadable documents, unsupported context size, missing Azure configuration, throttling, and missing D365 save operation. Do not use live candidate records to validate a test environment without an appropriate data-processing setup.
+
+HR can retry a failed evaluation after fixing its cause. A valid cached result is reused for ERP save-only retries; completion requires matching ERP acknowledgement. SQLite or optional PostgreSQL stores that durable state. See [operations](deployment.md) and [Supabase migration](supabase.md).
+
+The AI assessment has a 360-second total budget within the worker job limit. A timeout or interrupted worker records an actionable internal failure; HR can retry rather than leaving the application indefinitely processing. PostgreSQL-backed deployments use a database evaluation lock in addition to Redis coordination.

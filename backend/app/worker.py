@@ -7,6 +7,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from contextlib import AsyncExitStack
 
 from arq import Retry, cron
 from arq.connections import RedisSettings
@@ -18,7 +19,7 @@ from app.models import Evaluation, Job
 from app.observability import configure_logging, error_fields, log_context, log_event, stage, traced
 from app.queue import SubmissionCoordinator
 from app.services.ai import AIService
-from app.metadata import SQLiteMetadata
+from app.metadata import MetadataStore
 from app.services.sqlite_d365 import connected_adapter
 from app.services.resumes import ResumeService
 
@@ -70,11 +71,11 @@ async def _worker_startup(ctx, settings):
         settings=settings, adapter=connected_adapter(settings), resumes=ResumeService(settings), ai=AIService(settings)
     )
     metadata = getattr(ctx["adapter"], "metadata", None)
-    if isinstance(metadata, SQLiteMetadata):
-        log_event("worker.sqlite_initialize", "start")
+    if isinstance(metadata, MetadataStore):
+        log_event("worker.metadata_initialize", "start", storage=metadata.storage_name)
         await metadata.initialize()
         ctx["metadata"] = metadata
-        log_event("worker.sqlite_initialize", "completed")
+        log_event("worker.metadata_initialize", "completed", storage=metadata.storage_name)
     ctx["coordinator"] = SubmissionCoordinator(settings, ctx["adapter"], ctx["resumes"], ctx["redis"])
     await ctx["coordinator"].reconcile()
 
@@ -91,7 +92,32 @@ async def evaluate_application(
         started = time.monotonic()
         log_event("worker.evaluation", "start")
         try:
-            result = await _evaluate_application(ctx, application_id, resume_ref, filename, requirement_id, job_snapshot)
+            metadata = ctx.get("metadata") or getattr(ctx["adapter"], "metadata", None)
+            metadata = metadata if isinstance(metadata, MetadataStore) else None
+            async with AsyncExitStack() as resources:
+                acquired = True
+                if metadata:
+                    acquired = await resources.enter_async_context(metadata.evaluation_lock(application_id))
+                if not acquired:
+                    # Another desktop can have its own Redis but the same
+                    # cloud DB. Only its current lock holder may run the AI.
+                    log_event("worker.evaluation", "retrying", reason="shared_evaluation_running", retry_in_seconds=90)
+                    # Do not retain a successful ARQ result for work another
+                    # instance has not finished; it could crash before saving.
+                    raise Retry(defer=90)
+                else:
+                    try:
+                        result = await _evaluate_application(ctx, application_id, resume_ref, filename, requirement_id, job_snapshot)
+                    except asyncio.CancelledError:
+                        # ARQ timeout/shutdown must leave an actionable state,
+                        # retaining any validated output for a later save retry.
+                        if metadata:
+                            state = await metadata.get_evaluation_state(application_id) or {}
+                            if state.get("status") != "Completed":
+                                state.update(status="Failed", error_code="processing_interrupted")
+                                await asyncio.wait_for(asyncio.shield(
+                                    metadata.save_evaluation_state(application_id, state)), timeout=5)
+                        raise
         except Retry:
             log_event("worker.evaluation", "retrying", level=logging.WARNING,
                       elapsed_ms=round((time.monotonic() - started) * 1000, 2))
@@ -114,12 +140,12 @@ async def _evaluate_application(ctx, application_id, resume_ref, filename, requi
     settings, redis = ctx["settings"], ctx["redis"]
     key = f"{settings.redis_prefix}:evaluation:{application_id}"
     metadata = ctx.get("metadata") or getattr(ctx["adapter"], "metadata", None)
-    metadata = metadata if isinstance(metadata, SQLiteMetadata) else None
+    metadata = metadata if isinstance(metadata, MetadataStore) else None
 
     @traced("worker.evaluation_state_persist")
     async def persist(state):
         log_event("worker.evaluation_state", "saving", status=state.get("status"),
-                  storage="sqlite" if metadata else "redis")
+                  storage=metadata.storage_name if metadata else "redis")
         if metadata:
             await metadata.save_evaluation_state(application_id, state)
         else:
@@ -134,7 +160,7 @@ async def _evaluate_application(ctx, application_id, resume_ref, filename, requi
     log_event("worker.evaluation_lock", "completed", lock_acquired=True)
     try:
         if metadata:
-            log_event("worker.application_snapshot", "start", storage="sqlite")
+            log_event("worker.application_snapshot", "start", storage=metadata.storage_name)
             record = await metadata.get_application(application_id, settings.d365_company)
             if not record or record["stage"] not in {"accepted", "queued"}:
                 log_event("worker.application_snapshot", "rejected", level=logging.ERROR,
@@ -202,7 +228,7 @@ async def _evaluate_application(ctx, application_id, resume_ref, filename, requi
                 )
             if metadata:
                 # The adapter also commits the confirmed evaluation identifiers/date.
-                with stage("worker.evaluation_acknowledgement", storage="sqlite"):
+                with stage("worker.evaluation_acknowledgement", storage=metadata.storage_name):
                     state.update(await metadata.get_evaluation_state(application_id) or {})
                     state["evaluation_confirmed"] = True
             state["status"] = "Completed"

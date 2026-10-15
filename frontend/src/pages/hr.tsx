@@ -67,7 +67,7 @@ function RetryEvaluationButton({ requirementId, applicationId }: { requirementId
     mutationFn: () => api.retryEvaluation(requirementId, applicationId),
     onMutate: () => setError(""),
     onSuccess: async () => {
-      toast.success("Evaluation queued. Keep the worker running.");
+      toast.success("Evaluation queued. You can continue reviewing.");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["candidate", requirementId, applicationId] }),
         queryClient.invalidateQueries({ queryKey: ["candidates", requirementId] }),
@@ -781,7 +781,7 @@ export function CandidateRankingPage() {
         title={job.data?.title || "Candidate evidence"}
         description={`${requirementId}${job.data?.department ? ` · ${job.data.department}` : ""}${job.data?.location ? ` · ${job.data.location}` : ""}`}
         action={
-          <div>
+          <div className="heading-actions">
             <Button variant="secondary" disabled={query.isFetching} onClick={() => { void query.refetch(); }}>
               <RefreshCw size={14} /> Refresh list
             </Button>
@@ -838,7 +838,7 @@ export function CandidateRankingPage() {
             value={match}
             onChange={(event) => setMatch(event.target.value)}
           >
-            <option value="">All evidence labels</option>
+            <option value="">All evidence</option>
             {Array.from(
               new Set(
                 query.data?.candidates
@@ -854,7 +854,7 @@ export function CandidateRankingPage() {
             value={status}
             onChange={(event) => setStatus(event.target.value)}
           >
-            <option value="">All processing statuses</option>
+            <option value="">All statuses</option>
             {Array.from(
               new Set(query.data?.candidates.map((item) => item.ai_status)),
             ).map((value) => (
@@ -1353,7 +1353,7 @@ export function CandidateDetailPage() {
             <section className="card">
               <EmptyState
                 title={candidate.ai_status.toLowerCase() === "failed" ? "Evaluation needs another attempt" : "The evidence is still coming together"}
-                description={`AI processing status: ${candidate.ai_status}. Your team can review the resume in the meantime. A score appears after evidence validation and D365 save confirmation.`}
+                description={`Processing status: ${candidate.ai_status}. Your team can review the resume in the meantime. A score appears once the evaluation is verified and saved.`}
                 icon={<Clock3 />}
                 action={
                   candidate.ai_status.toLowerCase() === "failed" ? (

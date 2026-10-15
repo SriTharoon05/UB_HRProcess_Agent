@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -246,8 +247,17 @@ class AIService:
                     messages.append({"role": "user", "content": "The previous response failed validation. " + CORRECTION_RULES[exc.reason] + " Re-evaluate the original JOB and RESUME and return the complete corrected assessment."})
             raise IntegrationError("AI validation attempt limit is invalid", retryable=False)
 
+        async def timed_assessment(client: Any) -> Assessment:
+            try:
+                # Leave room inside ARQ's 540-second limit for extraction,
+                # state persistence and the D365 write, including SDK retries.
+                return await asyncio.wait_for(validated_assessment(client), timeout=360)
+            except TimeoutError:
+                log_event("ai.evaluate", "failed", level=logging.WARNING, reason="evaluation_time_limit")
+                raise IntegrationError("AI evaluation exceeded its time limit. HR can retry the application.", retryable=False) from None
+
         if self.client is not None:
-            assessment = await validated_assessment(self.client)
+            assessment = await timed_assessment(self.client)
         else:
             async with AsyncAzureOpenAI(
                 azure_endpoint=self.settings.azure_openai_endpoint,
@@ -256,7 +266,7 @@ class AIService:
                 timeout=90.0,
                 max_retries=2,
             ) as client:
-                assessment = await validated_assessment(client)
+                assessment = await timed_assessment(client)
         log_event("ai.provenance", "start", deployment=self.settings.azure_openai_deployment, prompt_version=version)
         result = Evaluation.model_validate({
             **assessment.model_dump(),

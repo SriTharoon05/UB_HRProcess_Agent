@@ -130,9 +130,11 @@ def test_application_real_upload_idempotency_ownership_and_hr_download(client, p
     assert submit(client, csrf, pdf_bytes + b"x").status_code == 409
     own = client.get(f"/api/applications/{application_id}").json()
     assert "evaluation" not in own and "owner_sub" not in own and "resume_ref" not in own
+    assert "ai_status" not in own
     history = client.get("/api/me/applications").json()
     assert len(history) == 1 and history[0]["application_id"] == application_id
     assert "evaluation" not in history[0]
+    assert "ai_status" not in history[0]
     assert client.get("/api/applications/DEMO-APP-001").status_code == 404
     assert client.get(f"/api/hr/applications/{application_id}/resume").status_code == 403
     login(client, "hr")

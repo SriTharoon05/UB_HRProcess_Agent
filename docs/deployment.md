@@ -1,90 +1,87 @@
-# Production deployment and operations
+# Deployment and operations
 
-The included Compose configuration is a local demo. A connected production deployment needs configured identity providers, verified D365 contracts, private Azure services, Redis, and a separately running evaluation worker. External resources and X++ services are not provisioned by this repository.
+The supported local connected package is a Docker Compose application with HTTPS frontend gateway, API, worker and Redis. Its only published port is `127.0.0.1:7242`; the portal and LinkedIn callback use **https://localhost:7242**. Follow [Docker setup and source-free transfer](docker-local.md) for exact build/export/import and one-time certificate trust instructions.
 
-The supplied connected override uses the configured backend environment and explicitly switches both API and worker to production mode. After populating `backend/.env`, registering HTTPS callbacks, and deploying the required X++ operations, run from the repository root:
+This is a local production-mode deployment of Phase 1. It does not provision external services or establish organizational production approval. Public cloud hosting requires its own DNS, ingress, callbacks, secrets, networking, capacity and operations design.
 
-```bash
-TALENTMATCH_PUBLIC_URL=https://recruitment.example.com docker compose -f compose.yml -f compose.production.yml --profile connected up --build -d
-```
+## Runtime configuration and service arrangement
 
-Replace the example origin with your actual HTTPS ingress origin; do not include a path or trailing slash. The override sets matching frontend/backend URLs and JSON CORS origins. It does not create an HTTPS ingress, Azure resources, provider registrations, or D365 operations, and live connected deployment is unverified. Its internal Redis is isolated on the Compose network but needs your reviewed persistence/access/backup arrangement for the target production environment.
+Root `.env` is the portable Docker runtime configuration. Native development uses `backend/.env` from the backend working directory. Do not overwrite a working configuration with an example. API and worker must share metadata engine/connection, Redis endpoint/prefix, D365 company, private Blob and model settings.
 
-## Recommended service arrangement
+The connected Compose file fixes production mode, disables demo and sets the canonical HTTPS origins/callback. It serves built static assets and proxies `/api` and `/auth` to the internal HTTP API. Redis has no published host port; the local Compose network is the access boundary. The local Redis instance has persistence and no password; use an authenticated private/TLS endpoint when infrastructure crosses trust boundaries. `REDIS_URL` can override the bundled service.
 
-Serve the built frontend through an HTTPS gateway/static host. Route `/api` and `/auth` to FastAPI under the same externally visible origin. Deploy API and worker as separate supervised services, for example Azure Container Apps or App Service plus an appropriate worker service. Use the same application configuration, private Blob container, Redis service/prefix and durable SQLite database for both. The worker command is:
+After changing `.env`, run the setup/start wrapper to recreate containers with the new environment. Desktop Play restarts an existing container configuration, not edited dotenv settings. Docker images never include `.env` or data volumes. Secret rotation requires restart/recreation of affected services.
 
-```bash
-python -m app.worker
-```
-
-Build the frontend with `npm ci && npm run build`; deploy `frontend/dist` with a React Router fallback to `index.html`. The nginx container includes the API/auth proxy and routing fallback. Run Uvicorn behind the gateway; restrict trust in forwarded headers to the actual proxy and do not expose an administrative API or Redis directly to the internet.
-
-When a managed network uses its own trusted certificate authority, both Dockerfiles accept an optional BuildKit `build_ca_bundle` secret containing the approved CA bundle. Pass it with `--secret id=build_ca_bundle,src=/path/to/approved-ca-bundle.pem` and the network's supported proxy settings. The bundle is mounted only during dependency installation. Package TLS and artifact verification remain enabled; normal public-network builds use standard trust roots.
+For a separately managed deployment, supervise API and worker independently behind a trusted same-origin HTTPS gateway. Run the worker with `python -m app.worker`. Restrict forwarded-header trust to the actual gateway and do not expose private Redis/database or administrative interfaces publicly. Use approved runtime secret injection rather than secrets baked into images or frontend assets.
 
 ## Minimum connected configuration
 
-Set `APP_ENV=production`, `DEMO_MODE=false`, `D365_ENABLED=true`, `D365_CONTRACT_MODE=sqlite`, a shared absolute `SQLITE_DATABASE_PATH`, HTTPS `FRONTEND_BASE_URL`/`BACKEND_BASE_URL`, and an explicit JSON `CORS_ALLOWED_ORIGINS` allowlist. Configure the exact HTTPS LinkedIn OAuth callback and credentials, backend-only `HR_USERNAME`/`HR_PASSWORD`, D365 service credentials, private Blob settings, Azure OpenAI deployment settings, and private Redis. HR password login does not require an Entra web-app registration or HR callback; D365's separate service-app credentials remain required.
+Configure LinkedIn OIDC client/secret and exact callback; backend-only `HR_USERNAME`/`HR_PASSWORD`; D365 service-app credentials, company and three operation paths; Azure OpenAI endpoint/key/deployment/API version; private Azure Blob; Redis; and a durable metadata store. Production rejects demo mode, non-HTTPS browser origins, wildcard CORS and public/local document fallback.
 
-Production configuration rejects demo mode, non-HTTPS portal/backend URLs, wildcard CORS, and non-HTTPS allowed origins. Cookies are Secure/HttpOnly/SameSite=Lax in production. Prefer same-origin hosting so cookies, callback state, and CSRF checks have one clear trust boundary.
+The current HR account is one environment-configured shared account. Broader enterprise rollout should use named organizational identities, MFA/SSO, least privilege and suitable audit attribution. Password matching is exact; choose and protect a strong unique value. Keep D365 service-app Entra credentials separate from HR sign-in.
 
-Supply credentials from the runtime secret store, preferably Azure Key Vault references or your orchestrator's secret injection. Do not embed secrets in images, source, frontend assets, saved cloud setup scripts, or command-line arguments. This implementation accepts environment-injected credentials; it does not claim a deployed Key Vault integration or managed-identity authentication path. Rotate secrets and redeploy/restart services when their values change.
+See [environment settings](environment.md), [authentication](linkedin-auth.md), and [AI behavior](azure-openai.md).
 
-## D365 acceptance gate
+## Metadata durability
 
-The resource application must be registered/authorized in D365 with least-privilege access to the required custom services. Check the token resource scope, configured company, existing request/response mapping, stable application identifiers, server-side submission uniqueness, and one-evaluation-per-application upsert.
+SQLite is default: API/worker share `/app/data/talentmatch.sqlite3` in one persistent local volume. Do not use independent copies, SMB/NFS or multiple hosts with a shared WAL file. Retain volumes across upgrades. `docker compose down --volumes` destroys local portal and Redis data.
 
-Deploy the three source-pack operations `getOpenRequirements`, `submitApplication`, `saveCandidateEvaluation` under `UBHRPortalServiceGroup/UBHRPortalService`. Existing screenshot tables are used; no new D365 columns/EDTs/enums are required. Inspect existing ID lengths and unique indexes, actual enum symbols, company scope and table defaults before acceptance. SQLite mode reads history/detail/ranking locally, so no additional read-service endpoints are needed. These reads cover only acknowledged portal submissions; external F&O recruiter edits are not synchronized. See [D365 schema](d365-schema.md) and [D365 endpoints](d365-endpoints.md).
+PostgreSQL/Supabase is optional through `METADATA_BACKEND=postgres`, server-only `DATABASE_URL`, `DATABASE_SSLMODE=verify-full`, and optional trusted `DATABASE_SSLROOTCERT`. The separate `D365_CONTRACT_MODE=sqlite` remains the three-operation ERP contract. Follow the explicit stopped-writer, atomic, conflict-detecting [migration procedure](supabase.md); image transfer does not migrate data.
 
-## SQLite durability and deployment scope
+Start with one active connected stack per metadata database. Deliberate multiple-stack deployments should share private Redis/prefix, D365 company and Blob storage. Database evaluation locks supplement retry safety but do not replace queue/session coordination. Independent per-PC Redis with a shared PostgreSQL database is not the recommended deployment model.
 
-The default three-operation adapter uses SQLite as durable portal storage. It contains candidate/contact/profile snapshots, consent, resume references/checksums, full JD snapshots, request keys/outbox acknowledgements, timestamps and complete validated evaluations including provenance. Actual uploaded documents stay in private Blob Storage.
+## ERP acceptance
 
-API and worker must resolve `SQLITE_DATABASE_PATH` to **the same file on a shared local persistent volume**. The connected Compose override uses `/app/data/talentmatch.sqlite3` in both services and a common named volume. Retain that volume when restarting services; `docker compose down --volumes` removes persistent local data. Restrict directory access to the application identity and use disk/volume encryption and reviewed backup access.
+Deploy `getOpenRequirements`, `submitApplication`, and `saveCandidateEvaluation` under `UBHRPortalServiceGroup/UBHRPortalService` using the existing four tables in model `UBHR_Nive`. Validate company scope, actual enums, EDT/ID sizes, table defaults, unique indexes, stable-ID reuse and boolean/matching-ID response contracts. The four evaluation Memo fields must be accepted by the service.
 
-This arrangement supports one host/shared local volume. WAL-mode SQLite does not support independent database copies on different hosts or an SMB/NFS-mounted file. Do not scale API/worker replicas across machines under that configuration; use a reviewed server database migration for multi-host deployment.
+Only these three paths are needed. Leave optional history/detail/top-candidate read paths empty under this contract; metadata serves acknowledged portal records. Existing ERP-only history and recruiter status edits are not synchronized. The repository provides X++ source, not a compiled/deployed model. Live compilation, permissions and serializer acceptance remain F&O responsibilities.
 
-Use SQLite's online backup API or stop writers for a consistent backup; blindly copying only the `.sqlite3` file while its WAL is active can lose committed data. Test restore together with F&O IDs, private Blob documents and queue recovery. SQLite data is not an expendable Redis cache and is not automatically deleted by `RETENTION_DAYS`.
+## Queue durability and failed evaluations
 
-## Redis durability and recovery
+Redis carries sessions, queue arguments, locks and temporary state; durable metadata contains outbox and validated evaluations. Use persistence, monitor memory/latency/backlog, and avoid evicting active jobs or sessions. The local bundle stores AOF in a named volume. A shared managed service needs reviewed authentication, TLS, access and backup settings.
 
-Use a dedicated private Redis service with authentication, TLS where available, persistence, and appropriate backup/availability. In SQLite mode Redis carries sessions, locks and queued job arguments; the submission outbox and full evaluation state are durable SQLite records. Legacy mode also retains submission/evaluation cache state in Redis. Restrict access to the API/worker, isolate tenants/environments, and avoid an eviction policy that discards active jobs or session state. Monitor available memory, queue latency, worker liveness, failed jobs, and persistence/backup health.
+The worker reconciles unfinished outbox records at startup and periodically. Transient failures retry with bounded backoff. Schema/evidence failures get a bounded correction loop; exhausted non-retryable failures await an explicit HR action after their cause is reviewed. Save-only retries reuse cached valid output rather than generate a new score.
 
-The API durably stores the frozen submission intent and stable application ID in SQLite before calling D365, records its acknowledgement, then queues evaluation. The worker reconciles unfinished submission outbox records at startup and periodically. The queue carries document references and job context, not OAuth tokens or raw resume text. SQLite retains contact metadata, job snapshots and validated evaluations; temporary coordination can also include sensitive metadata. Protect both stores and their backups accordingly.
+HR can click **Retry evaluation** on a failed application and **Refresh list**. The endpoint is HR-only, CSRF-protected and rejects inappropriate active/completed work. A CLI is available when needed:
 
-Transient evaluation failures retry with bounded exponential backoff. Cached validated output is reused after a D365 save failure, avoiding another model-generated score on a persistence retry. Completed state avoids unnecessary repeated work. This still requires D365-side stable-ID uniqueness: an HTTP timeout can occur after F&O has already committed, while SQLite/Redis can be restored independently.
-
-After fixing a missing endpoint or credential, restart API/worker with the new environment and requeue retained failed work:
-
-```bash
+```powershell
 cd backend
-uv run --frozen python -m app.retry_evaluation APP-000125
+.\.venv\Scripts\python.exe -m app.retry_evaluation APP-REPLACE-WITH-REAL-ID
 ```
 
-Use the real application ID. The recovery command requires exactly one retained submission, rejects a running/already-queued evaluation, and does not rerun completed work. It preserves cached validated AI output to retry only the failed persistence step where possible. Do not delete temporary state or upload a duplicate application just to rerun evaluation. Terminal errors and stored pending output must be reviewed before their retention expiry. Failed/Processing state is recorded locally and is not proof that D365's business status was updated. SQLite exposes the complete result only after the matching F&O evaluation acknowledgement.
+Do not delete durable state or submit a duplicate application to rerun processing. An HTTP timeout may occur after ERP committed; stable identifier uniqueness/upsert must make the repeated delivery safe. Internal `Failed` is an operational state, not a candidate rejection. Candidate pages do not expose it.
 
-## Private documents
+## Backup and restore
 
-Create the Blob container in advance with public access disabled. The adapter checks container privacy and uses generated opaque object names. It rejects connected local storage and does not issue public URLs. HR downloads pass through a backend role check and a trusted acknowledged SQLite application/storage reference in the three-operation mode. Apply storage-account firewall/private endpoints, least-privilege access, encryption, region policy, and operational access auditing as required by your organization.
+Maintain separate coordinated backups for metadata, private documents, ERP records, required Redis persistence and secret configuration. Image archives distribute application code, not data. Protect exports and test restoration against real stable-ID/document references.
 
-Local demo documents are stored in an ignored private directory with restrictive file permissions. They are real uploads; do not use sensitive candidate documents in a development/demo environment. PDF/DOCX structural validation is not antivirus scanning. Where required, integrate an approved malware scanner/quarantine pipeline before making uploaded documents available to reviewers.
+For SQLite, use its online backup API or stop writers. Copying only the live main `.sqlite3` file while WAL is active can lose committed records. A new volume starts empty; retain/restores must target the same shared path. For PostgreSQL, use approved managed backups/PITR or encrypted logical backups and a tested restore plan. Do not switch back to an old SQLite snapshot after PostgreSQL accepted new writes without reconciliation.
 
-## Retention and deletion
+Restore documents with their private object references and ensure ERP applications/evaluation identifiers still match. A database backup alone cannot restore deleted Blob files or ERP state. Named Docker volumes remain local to their host; transferring an image does not transfer them.
 
-`RETENTION_DAYS` controls temporary submission/idempotency/evaluation-state expiry; `SESSION_TTL_SECONDS` controls sessions. Document and business-record deletion are separate policies, not automatic effects of that variable. Set values to the approved policy, not merely the defaults. Coordinate Redis expiry, SQLite application/profile/evaluation records, Blob lifecycle/soft-delete/versioning, D365 records/evaluations, exported data and backup retention. Scheduled cleanup and operational deletion must account for active retries and lawful retention exceptions.
+## Documents, retention and privacy
 
-The private-storage adapter supports deletion, but the repository does not automatically delete business records or implement a cross-system cleanup command. Configure a reviewed Azure Blob lifecycle rule for production documents. Manually remove expired demo documents only after checking that no active application/test needs them. A deletion in Blob is not a deletion in D365: define a supported X++ business-record deletion/anonymization procedure and subject-request authorization separately. The three F&O service operations do not provide that deletion contract. Do not claim a complete cross-system erasure because a document or Redis key expired.
+Connected mode requires an existing private Azure Blob container. The adapter checks privacy, uses opaque names, and serves HR downloads through backend authorization. Apply the organization's storage access, encryption, region, retention and incident policies. Format/structure validation is not malware scanning; add approved quarantine/scanning where required. OCR is not currently implemented.
 
-Publish a reviewed privacy notice, version it with `CONSENT_VERSION`, and capture explicit consent before submission. The prompt minimizes obvious identifiers but does not guarantee anonymization. Review regional/provider handling for sending candidate resume text to Azure OpenAI and limit access to relevant HR users.
+`RETENTION_DAYS` expires temporary processing/idempotency state, not all metadata, Blob, ERP or backup records. Coordinate lawful retention, subject-request handling, deletion/anonymization and backups across systems. Cross-system automated erasure is not included. Consent must match `CONSENT_VERSION` and an approved privacy notice.
 
-## Observability and health
+The model receives best-effort identity-minimized resume text, not guaranteed anonymous data. Approve external provider/region processing. AI scores are contextual evidence, not employment decisions or verified claims.
 
-`GET /api/health` reports application health/mode; it is not a certificate that all external credentials, callbacks, or X++ contracts work. Check API, worker, Redis, storage, D365, and Azure OpenAI separately during rollout.
+## Logs and health
 
-API and worker terminals report stage start/completion/failure, elapsed time, request IDs, stable application IDs and D365 correlation IDs. `LOG_LEVEL=INFO` is the default; `LOG_LEVEL=DEBUG` adds safe diagnostic events after restarting both services. Known D365 validation errors include a canonical provider message and a suggested check; arbitrary provider response bodies are not printed. OAuth query strings and raw worker job arguments/results are suppressed. Logs omit tokens, secrets, raw resumes and candidate contact details at both levels. See [terminal logging and debugging](debugging.md) for PowerShell capture commands, tracing a failed stage, and interpreting D365 HTTP 500 responses.
+Docker Desktop exposes individual service logs. From the runtime directory:
 
-Run a live acceptance flow with a synthetic text-based resume: authenticate, read a real open job, submit once, retry the same request, observe worker progression, verify the evaluation in D365, inspect job-specific HR evidence, and download the authorized original. Check cross-role/cross-owner denial and a missing integration path. The repository test suite uses mocks and cannot replace these live deployment checks.
+```powershell
+docker compose ps
+docker compose logs --follow api worker
+```
 
-## Human review
+`GET https://localhost:7242/api/health` checks the application/mode, not all external credentials. Terminal stages record start/completion/failure, elapsed time, application ID and safe D365 correlation diagnostics. `LOG_LEVEL=DEBUG` adds safe field shape details; raw credentials, OAuth query values, resume/model content and candidate contacts remain excluded. See [debugging](debugging.md).
 
-Retain visible AI labels and evidence/context in the HR workspace. A score is approximate evidence alignment, not candidate worth or a hiring recommendation. Quotes can be real while the model's reasoning is incorrect. Missing resume evidence does not establish missing ability. No score threshold automatically accepts/rejects candidates, and no HR status mutation is offered without a supported D365 write.
+The bundle caps Docker JSON logs at 10 MB × 3 per service. External deployments need reviewed collection, alerting, retention and operator access. Monitor worker liveness, queue age, repeated failure reasons, failed ERP deliveries, database/Blob capacity and certificate expiry.
+
+## Rollout criteria and remaining work
+
+Use a synthetic live flow to verify exact selected-job callback return, valid PDF/DOCX extraction, single ERP application creation, evidence checking, acknowledged evaluation save, HR retry, private document ownership/role enforcement and backup restoration. Local mock tests do not establish provider registration or X++ acceptance. Consult [validation](validation.md) for executed local results.
+
+Remaining enterprise work includes named HR identity, approved document malware scanning/OCR, ERP status synchronization, cross-system erasure/audit, capacity/availability objectives, and reviewed operational controls. Future screening/interview/onboarding/employee-maintenance functions are roadmap, not current delivered scope. See the [technical](technical-reference.md) and [business](business-reference.md) references.

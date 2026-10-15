@@ -25,7 +25,7 @@ from app.models import Application, Job, User
 from app.observability import RequestLoggingMiddleware, configure_logging, log_context, log_event, stage, traced
 from app.profile import valid_contact_email
 from app.queue import SubmissionCoordinator, submission_fingerprint
-from app.metadata import SQLiteMetadata
+from app.metadata import MetadataStore
 from app.retry_evaluation import retry as retry_evaluation
 from app.services.sqlite_d365 import connected_adapter
 from app.services.resumes import ResumeService
@@ -138,7 +138,7 @@ def create_app(settings: Settings | None = None):
     async def lifespan(app):
         with stage("api.startup", mode="demo" if settings.demo_mode else "connected"):
             metadata = getattr(app.state.adapter, "metadata", None)
-            if isinstance(metadata, SQLiteMetadata):
+            if isinstance(metadata, MetadataStore):
                 await metadata.initialize()
             if not settings.demo_mode:
                 with stage("redis.connect"):
@@ -404,7 +404,7 @@ def create_app(settings: Settings | None = None):
             )
 
     async def processing_status(record):
-        if app.state.redis and not isinstance(getattr(app.state.adapter, "metadata", None), SQLiteMetadata):
+        if app.state.redis and not isinstance(getattr(app.state.adapter, "metadata", None), MetadataStore):
             value = await app.state.redis.get(f"{settings.redis_prefix}:evaluation:{record.application_id}")
             if value:
                 record = record.model_copy(update={"ai_status": json.loads(value)["status"]})
@@ -472,7 +472,7 @@ def create_app(settings: Settings | None = None):
             raise HTTPException(503, "The evaluation queue is unavailable. Please retry shortly.")
         metadata = getattr(app.state.adapter, "metadata", None)
         message = await retry_evaluation(application_id, settings, redis=app.state.redis,
-                                        metadata=metadata if isinstance(metadata, SQLiteMetadata) else None,
+                                        metadata=metadata if isinstance(metadata, MetadataStore) else None,
                                         failed_only=True)
         return {"success": True, "application_id": application_id,
                 "ai_status": (await processing_status(await app.state.adapter.get_application(application_id))).ai_status,

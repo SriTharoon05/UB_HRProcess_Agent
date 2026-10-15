@@ -6,6 +6,19 @@ jobs:
   check:
     runs-on: ubuntu-latest
     services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: talentmatch
+          POSTGRES_PASSWORD: integration-test-only
+          POSTGRES_DB: talentmatch_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U talentmatch -d talentmatch_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
       redis:
         image: redis:7.4-alpine
         ports:
@@ -17,6 +30,7 @@ jobs:
           --health-retries 10
     env:
       REDIS_TEST_URL: redis://127.0.0.1:6380/15
+      POSTGRES_TEST_URL: postgresql://talentmatch:integration-test-only@127.0.0.1:55432/talentmatch_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

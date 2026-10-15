@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 from typing import Literal
 
-from pydantic import AliasChoices, Field, ValidationError, model_validator
+from pydantic import AliasChoices, Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.errors import ConfigurationError
@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     hr_allowed_roles: list[str] = ["HRRecruiter", "HRAdministrator", "TalentMatch.HR"]
     d365_contract_mode: Literal["sqlite", "legacy"] = "sqlite"
     sqlite_database_path: Path = Path(".local/talentmatch.sqlite3")
+    metadata_backend: Literal["sqlite", "postgres"] = "sqlite"
+    database_url: str = Field(default="", repr=False, max_length=4096)
+    database_sslmode: Literal["verify-full", "disable"] = "verify-full"
+    database_sslrootcert: Path | None = None
+    database_connect_timeout: int = Field(default=10, ge=1, le=60)
     d365_enabled: bool = False
     d365_base_url: str = "https://org1a43c536.operations.dynamics.com"
     d365_tenant_id: str = ""
@@ -90,6 +95,15 @@ class Settings(BaseSettings):
     azure_storage_connection_string: str = Field(default="", repr=False)
     azure_storage_container: str = "resumes"
     evaluation_max_attempts: int = Field(default=5, ge=1, le=10)
+
+    @field_validator("database_sslrootcert", mode="before")
+    @classmethod
+    def optional_database_certificate(cls, value):
+        # A copied .env template intentionally leaves this optional setting
+        # blank. Path("") would become '.', which libpq cannot use as a CA file.
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def resolve_sqlite_evaluation_endpoint(self):

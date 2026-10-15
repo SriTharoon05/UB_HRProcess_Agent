@@ -1,0 +1,10 @@
+# Explicit fictional demo, never use with real recruitment data.
+services:
+  api:
+    environment:
+      APP_ENV: development
+      DEMO_MODE: 'true'
+  worker:
+    environment:
+      APP_ENV: development
+      DEMO_MODE: 'true'

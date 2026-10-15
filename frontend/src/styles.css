@@ -7,14 +7,14 @@
   color: #26243b;
   background: #bfc3cb;
   font-synthesis: none;
-  font-weight: 400;
+  font-weight: 500;
   font-size: 13px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   --purple: #7560df;
   --purple-dark: #5d46c6;
   --canvas: #f6f7fb;
-  --muted: #858493;
+  --muted: #6f667a;
   --border: #eeedf4;
   --ink: #272538;
 }
@@ -157,7 +157,7 @@ main:focus {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #777584;
+  color: var(--muted);
   font-size: 11px;
   padding: 0 1px 26px;
   white-space: nowrap;
@@ -169,7 +169,8 @@ main:focus {
   background: #a593ee;
 }
 .nav-label {
-  color: #a1a0ac;
+  color: var(--muted);
+  font-weight: 600;
   font-size: 11px;
   letter-spacing: 1.1px;
   margin: 0 12px 10px;
@@ -187,7 +188,7 @@ main:focus {
   padding: 12px;
   border-radius: 10px;
   font-size: 12px;
-  color: #73717f;
+  color: #625c70;
   white-space: nowrap;
   transition:
     background 0.2s,
@@ -5580,13 +5581,6 @@ select {
 }
 
 /* Keep supporting copy readable at every viewport and maintain clear contrast. */
-.page-heading h1,
-.welcome-line h1,
-.job-detail-header h1,
-.job-description h2,
-.job-description h3,
-.role-summary h3,
-.login-art h1,
 .hr-login-form {
   display: grid;
   gap: 18px;
@@ -5594,6 +5588,13 @@ select {
   text-align: left;
 }
 
+.page-heading h1,
+.welcome-line h1,
+.job-detail-header h1,
+.job-description h2,
+.job-description h3,
+.role-summary h3,
+.login-art h1,
 .login-card h2,
 .form-section-title h2,
 .application-job-card h3,
@@ -5644,14 +5645,14 @@ select {
 .help-copy p,
 .empty-state p {
   font-size: 13px;
-  color: #83798e;
+  color: var(--muted);
   line-height: 1.85;
 }
 .hero p {
   font-size: 13px;
   line-height: 1.8;
   max-width: 390px;
-  color: #e4d9ff;
+  color: #f1ecff;
 }
 .hero-footnote {
   font-size: 11px;
@@ -5683,14 +5684,15 @@ select {
 }
 .form-field > label {
   font-size: 13px;
-  color: #71677e;
+  color: #62566f;
+  font-weight: 600;
 }
 .form-field input {
   font-size: 13px;
   color: #5a4b67;
 }
 .form-field input[readonly] {
-  color: #85738f;
+  color: var(--muted);
 }
 .resume-dropzone strong,
 .checkbox-label {
@@ -5699,7 +5701,7 @@ select {
 }
 .resume-dropzone > span:not(.upload-icon) {
   font-size: 12px;
-  color: #8d7b9d;
+  color: var(--muted);
 }
 .profile-contact a {
   font-size: 12px;
@@ -5719,7 +5721,7 @@ select {
 .table-role > div > span,
 .table-location span {
   font-size: 11px;
-  color: #908397;
+  color: var(--muted);
 }
 td {
   font-size: 12px;
@@ -5728,7 +5730,8 @@ td {
 th {
   font-size: 11px;
   letter-spacing: 0.4px;
-  color: #96899f;
+  color: #6a5d75;
+  font-weight: 600;
 }
 .table-footer {
   font-size: 11px;
@@ -5871,10 +5874,10 @@ th {
   font-size: 11px;
 }
 .evidence-card blockquote {
-  color: #8e789b;
+  color: #675474;
 }
 .evidence-explanation p {
-  color: #86708f;
+  color: #675474;
 }
 .evidence-tabs > button {
   font-size: 12px;
@@ -5898,7 +5901,7 @@ th {
   font-size: 11px;
 }
 .global-search input::placeholder {
-  color: #a09baa;
+  color: #766d81;
 }
 .filter-row select {
   min-width: 130px;
@@ -5983,7 +5986,7 @@ th {
 }
 .score-ring > div > span {
   font-size: 11px;
-  color: #9c85ae;
+  color: #756086;
 }
 .score-ring small {
   font-size: 11px;
@@ -6026,6 +6029,29 @@ th {
 .recharts-text {
   font-size: 11px;
 }
+.heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.review-notice p,
+.eyebrow,
+.breadcrumbs,
+.user-chip > div > span,
+.metric-note,
+.job-id,
+.app-footer,
+.sidebar-signature {
+  color: var(--muted);
+}
+.button,
+.badge,
+.table-person a,
+.table-job-title {
+  font-weight: 600;
+}
 @media (max-width: 1080px) {
   .metric-note {
     display: none;
@@ -6055,6 +6081,13 @@ th {
   }
 }
 @media (max-width: 680px) {
+  .heading-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .dashboard-hero-art {
+    display: none;
+  }
   .page-heading .eyebrow,
   .welcome-line .eyebrow,
   .opportunity-card > .eyebrow,

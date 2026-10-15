@@ -11,8 +11,9 @@ import asyncio
 import json
 import os
 import sqlite3
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from fastapi import HTTPException
 
@@ -24,7 +25,39 @@ def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+@runtime_checkable
+class MetadataStore(Protocol):
+    """Durable portal state; transport/session locks remain separate."""
+
+    storage_name: str
+
+    async def initialize(self): ...
+    async def reserve(self, key: str, record: dict) -> tuple[dict, bool]: ...
+    async def get_submission(self, key: str) -> dict | None: ...
+    async def get_application(self, application_id: str, company: str | None = None) -> dict | None: ...
+    async def update_submission(self, key: str, record: dict): ...
+    async def submissions(self, *, company=None, owner=None, requirement_id=None): ...
+    async def get_evaluation_state(self, application_id: str): ...
+    async def save_evaluation_state(self, application_id: str, state: dict): ...
+    def evaluation_lock(self, application_id: str): ...
+
+
+def metadata_store(settings) -> MetadataStore:
+    if settings.metadata_backend == "postgres":
+        from app.postgres_metadata import PostgresMetadata
+        return PostgresMetadata(settings)
+    return SQLiteMetadata(settings.sqlite_database_path)
+
+
 class SQLiteMetadata:
+    storage_name = "sqlite"
+
+    @asynccontextmanager
+    async def evaluation_lock(self, application_id: str):
+        # One SQLite deployment already uses a shared Redis lock. PostgreSQL
+        # provides an additional cross-deployment lock for shared cloud records.
+        yield True
+
     def __init__(self, path: Path | str):
         self.path = Path(path).expanduser().resolve()
         self._initialized = False

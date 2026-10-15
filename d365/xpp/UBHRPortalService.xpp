@@ -422,17 +422,24 @@ public final class UBHRPortalService
     private void requireFieldText(Common _record, FieldId _fieldId, str _value, boolean _required = true)
     {
         DictField field = new DictField(_record.TableId, _fieldId);
+        boolean evaluationMemo;
         int maximumLength;
-        if (!field || field.baseType() != Types::String)
+        // These four business fields are Memo in the deployed UBHR model.
+        // Their base type can differ from a fixed-length string EDT.
+        evaluationMemo = _record.TableId == tableNum(UBHRMatchEvaluationTable)
+            && (_fieldId == fieldNum(UBHRMatchEvaluationTable, Summary)
+                || _fieldId == fieldNum(UBHRMatchEvaluationTable, MatchedSkillsJson)
+                || _fieldId == fieldNum(UBHRMatchEvaluationTable, MissingSkillsJson)
+                || _fieldId == fieldNum(UBHRMatchEvaluationTable, EvidenceJson));
+        if (!field || (!evaluationMemo && field.baseType() != Types::String))
         {
             throw error(strFmt("%1.%2 must be a string field for this service mapping.", tableId2Name(_record.TableId), fieldId2Name(_record.TableId, _fieldId)));
         }
-        maximumLength = field.stringLen();
+        maximumLength = evaluationMemo ? 1048576 : field.stringLen();
         if ((_required && !strLen(strLRTrim(_value)))
             || (maximumLength > 0 && strLen(_value) > maximumLength))
         {
-            // Reject truncation before fixed-length EDT assignment. Memo has
-            // no positive fixed limit; FastAPI bounds the complete payload.
+            // Reject truncation; Memo payloads have an explicit 1 MiB guard.
             throw error(strFmt("%1.%2 is missing or exceeds its existing field length (%3).", tableId2Name(_record.TableId), field.name(), maximumLength));
         }
     }

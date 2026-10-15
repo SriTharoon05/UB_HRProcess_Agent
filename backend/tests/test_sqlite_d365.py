@@ -1,5 +1,7 @@
 import hashlib
 import json
+import asyncio
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -210,6 +212,65 @@ async def test_operator_retry_uses_sqlite_cached_output_after_redis_flush(contex
     assert "queued" in await retry(app_id, ctx["settings"])
     retained = await ctx["adapter"].metadata.get_evaluation_state(app_id)
     assert retained["evaluation"] == state["evaluation"] and retained["status"] == "Pending"
+
+
+async def test_hr_retry_scopes_job_and_queues_failed_cached_evaluation_once(context):
+    from app.auth import hr_user, require_csrf
+    from app.main import create_app
+    ctx = context
+    app_id = (await submit(ctx))["application_id"]
+    ctx["redis"].jobs.clear()
+    await ctx["adapter"].metadata.save_evaluation_state(app_id, {
+        "status": "Failed", "evaluation": sample_evaluation().model_dump(), "evaluation_confirmed": False})
+    app = create_app(ctx["settings"])
+    app.state.adapter, app.state.redis = ctx["adapter"], ctx["redis"]
+    app.dependency_overrides[hr_user] = lambda: ctx["user"].model_copy(update={"role": "hr"})
+    app.dependency_overrides[require_csrf] = lambda: None
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post(f"/api/hr/jobs/OTHER/candidates/{app_id}/retry")).status_code == 404
+        route = f"/api/hr/jobs/{ctx['job'].requirement_id}/candidates/{app_id}/retry"
+        response = await client.post(route)
+        assert response.status_code == 200 and response.json()["ai_status"] == "Pending"
+        assert (await client.post(route)).status_code == 409
+    retained = await ctx["adapter"].metadata.get_evaluation_state(app_id)
+    assert retained["evaluation"]["score"] == 88 and len(ctx["redis"].jobs) == 1
+
+
+async def test_retry_queue_outage_keeps_failed_state_and_cached_evidence(context):
+    ctx = context
+    app_id = (await submit(ctx))["application_id"]
+    ctx["redis"].jobs.clear()
+    state = {"status": "Failed", "evaluation": sample_evaluation().model_dump(), "error_code": "integration_error"}
+    await ctx["adapter"].metadata.save_evaluation_state(app_id, state)
+    ctx["redis"].fail_enqueue = True
+    with pytest.raises(IntegrationError, match="Could not queue"):
+        await retry(app_id, ctx["settings"], redis=ctx["redis"], metadata=ctx["adapter"].metadata, failed_only=True)
+    assert await ctx["adapter"].metadata.get_evaluation_state(app_id) == state
+
+
+async def test_shared_database_evaluation_lock_prevents_duplicate_ai(context, monkeypatch):
+    ctx = context
+    app_id = (await submit(ctx))["application_id"]
+    @asynccontextmanager
+    async def busy(application_id):
+        assert application_id == app_id
+        yield False
+    monkeypatch.setattr(ctx["adapter"].metadata, "evaluation_lock", busy)
+    args = ctx["redis"].jobs["arq:job:evaluation:" + app_id]
+    with pytest.raises(Retry):
+        await evaluate_application(ctx, *args)
+    ctx["ai"].evaluate.assert_not_awaited()
+
+
+async def test_interrupted_worker_retains_actionable_failed_state(context):
+    ctx = context
+    app_id = (await submit(ctx))["application_id"]
+    args = ctx["redis"].jobs["arq:job:evaluation:" + app_id]
+    ctx["ai"].evaluate.side_effect = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await evaluate_application(ctx, *args)
+    state = await ctx["adapter"].metadata.get_evaluation_state(app_id)
+    assert state["status"] == "Failed" and state["error_code"] == "processing_interrupted"
 
 
 async def test_worker_rejects_altered_frozen_references_before_ai(context):

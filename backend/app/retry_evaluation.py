@@ -9,12 +9,13 @@ import asyncio
 import json
 import logging
 import uuid
+from contextlib import AsyncExitStack
 
 from arq.connections import RedisSettings, create_pool
 
 from app.config import get_settings
 from app.errors import IntegrationError
-from app.metadata import SQLiteMetadata
+from app.metadata import metadata_store
 from app.observability import configure_logging, error_fields, log_context, log_event, stage
 
 
@@ -26,7 +27,7 @@ async def retry(application_id, settings=None, *, redis=None, metadata=None, fai
 
 
 async def _retry(application_id, settings, *, redis=None, metadata=None, failed_only=False):
-    metadata = metadata or (SQLiteMetadata(settings.sqlite_database_path) if settings.d365_contract_mode == "sqlite" else None)
+    metadata = metadata or (metadata_store(settings) if settings.d365_contract_mode == "sqlite" else None)
     if metadata:
         record = await metadata.get_application(application_id, settings.d365_company)
         if not record or record["stage"] not in {"accepted", "queued"}:
@@ -63,7 +64,12 @@ async def _retry(application_id, settings, *, redis=None, metadata=None, failed_
         if not await lock.acquire():
             log_event("recovery.lock", "rejected", reason="evaluation_running")
             raise IntegrationError("An evaluation is running; retry later", status_code=409, retryable=False)
-        try:
+        async with AsyncExitStack() as resources:
+            resources.push_async_callback(lock.release)
+            if metadata:
+                acquired = await resources.enter_async_context(metadata.evaluation_lock(application_id))
+                if not acquired:
+                    raise IntegrationError("An evaluation is running on another instance; retry later", status_code=409, retryable=False)
             if metadata:
                 state = await metadata.get_evaluation_state(application_id) or {}
             else:
@@ -87,7 +93,7 @@ async def _retry(application_id, settings, *, redis=None, metadata=None, failed_
                 await redis.set(key, json.dumps(state), ex=settings.retention_days * 86400)
             record = records[0]
             try:
-                await redis.enqueue_job(
+                queued = await redis.enqueue_job(
                     "evaluate_application",
                     application_id,
                     record["resume_ref"],
@@ -97,6 +103,8 @@ async def _retry(application_id, settings, *, redis=None, metadata=None, failed_
                     _job_id=f"evaluation:{application_id}",
                     _expires=settings.retention_days * 86400,
                 )
+                if queued is None and not await redis.exists(f"arq:job:evaluation:{application_id}"):
+                    raise IntegrationError("The queue did not accept the evaluation", status_code=503)
             except Exception as exc:
                 # A queue outage must not leave a failed record looking pending.
                 if metadata:
@@ -107,8 +115,6 @@ async def _retry(application_id, settings, *, redis=None, metadata=None, failed_
                 raise IntegrationError("Could not queue the evaluation. Please retry shortly.", status_code=503) from exc
             log_event("recovery.evaluation", "queued", status="Pending")
             return "Evaluation queued using retained references and cached validated output."
-        finally:
-            await lock.release()
     finally:
         if owns_redis:
             await redis.aclose()

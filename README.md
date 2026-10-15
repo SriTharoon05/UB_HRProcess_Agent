@@ -1,203 +1,140 @@
-# TalentMatch AI
+# TalentMatch AI — Phase 1
 
-A recruitment portal with a candidate job board, private resume uploads, and an HR workspace for reviewing AI-generated evidence against each job description. The responsive violet dashboard follows the supplied UI reference.
+TalentMatch AI connects a React recruitment portal to Dynamics 365 Finance & Operations. Phase 1 delivers ERP job publication, LinkedIn candidate sign-in, private resume applications, AI-assisted resume/JD evidence analysis, and an HR review/retry workspace. Screening, interviews, offers, onboarding and employee maintenance are planned later phases.
 
-React communicates with FastAPI. D365 Finance & Operations stores the existing jobs, candidate/application records and core AI result. SQLite stores portal metadata and the complete evaluation, Azure Blob Storage keeps documents private, and a Redis-backed worker runs Azure OpenAI evaluations. Scores describe documented job/resume alignment. They do not automate hiring or rejection, and human review is required.
+F&O owns core recruitment records. SQLite or optional Supabase PostgreSQL stores portal metadata and complete evaluation provenance; private Azure Blob stores original documents; Redis coordinates sessions and background work. AI scores support human review and never automatically hire or reject a person.
 
-**The default development workflow is explicitly labeled demo mode.** Candidate demo access runs without external credentials, uses fictional jobs/candidates, and lets you upload a real PDF/DOCX and explore a labeled sample evaluation. HR sign-in uses backend-configured `HR_USERNAME`/`HR_PASSWORD`. Connected adapters are implemented separately; live LinkedIn, D365, Azure OpenAI, and Blob validation requires your configuration and deployed D365 contracts.
+## Start everything locally with Docker
 
-## What you can do
+The complete stack runs at **https://localhost:7242**. The LinkedIn callback is always:
 
-- Browse and filter open jobs; read the full job description.
-- Sign in as a demo candidate or use configured LinkedIn OIDC in connected mode.
-- Return from LinkedIn to the selected job, inspect the shared profile details, and confirm the remaining application contact information.
-- Upload a validated PDF/DOCX, accept consent, and submit an application with retry protection.
-- Review acknowledged portal applications and AI processing status from SQLite; external F&O recruiter edits are not synchronized in this three-operation version.
-- Sign in to the separate HR workspace; inspect candidates for one job and review scores, explanations, and supporting resume evidence.
-- Access original resumes through an authorized backend operation.
+```text
+https://localhost:7242/auth/linkedin/callback
+```
 
-## Stack and architecture
+Docker Compose groups the HTTPS frontend gateway, API, worker and Redis under **talentmatch**. API/Redis ports are internal. After initial setup, Docker Desktop **Containers → talentmatch → Play** starts the existing group with one action.
 
-| Layer | Technologies |
+From the source repository in PowerShell:
+
+```powershell
+.\scripts\docker\build.ps1
+.\scripts\docker\setup.ps1
+```
+
+The setup helper uses root `.env`; if absent it can copy your existing `backend/.env`. Review connected integration credentials before starting. The default portable deployment is production mode with real services and demo disabled. Do not overwrite a working environment with the example.
+
+Export a **source-free** bundle for another Docker machine:
+
+```powershell
+.\scripts\docker\export.ps1 -OutputDirectory .\dist\talentmatch
+```
+
+Transfer the generated folder/ZIP, supply private `.env` securely, and run its **setup.cmd** once. It imports images, creates/trusts a unique machine-local HTTPS certificate and starts the stack. The recipient needs Docker, no source code, Python, Node.js, Git or Visual Studio. Later use Docker Desktop's group Play. An `.env` change requires the supplied **start.cmd** to recreate configuration.
+
+See [complete Docker setup, transfer and troubleshooting](docs/docker-local.md). The image archive moves software, not existing records, resumes or secrets. External integrations still require internet and authorized credentials. A first-time Run on a single image cannot configure the whole stack by itself.
+
+## Documentation and shareable Word files
+
+| Guide | Purpose |
 | --- | --- |
-| Frontend | React, TypeScript, Vite, Tailwind CSS, Radix UI primitives, Lucide, React Router, TanStack Query, React Hook Form, Zod, Recharts |
-| Backend | Python 3.11+, FastAPI, Pydantic v2, HTTPX, MSAL, Authlib, Uvicorn |
-| Evaluation | Azure OpenAI SDK, structured JSON validation, versioned evidence prompt |
-| Documents | PyMuPDF, python-docx, private Azure Blob Storage; local development adapter |
-| Portal metadata | SQLite for frozen application/JD snapshots, document references, consent and full evaluation/provenance |
-| Jobs and sessions | Redis-backed background processing and temporary/session state |
-| Quality | Pytest, Vitest, Testing Library, ESLint, TypeScript checks, CI |
+| [Technical reference](docs/technical-reference.md) · [Word document](docs/reference/TalentMatch_AI_Technical_Reference.docx) | Architecture, processing flow, ERP mapping, AI validation, deployment, operations, limitations and roadmap |
+| [Business reference](docs/business-reference.md) · [Word document](docs/reference/TalentMatch_AI_Business_Reference.docx) | Phase 1 business journey, value, governance, responsibilities, pilot criteria and future phases |
+| [Local Docker handoff](docs/docker-local.md) | One-group startup, image export/import, certificates, recipient setup and data boundaries |
+| [Supabase migration](docs/supabase.md) | Optional PostgreSQL configuration, consistent SQLite migration, shared coordination and rollback |
+| [Environment reference](docs/environment.md) | Runtime settings, provider credentials and storage options |
+| [Architecture](docs/architecture.md) · [API](docs/api-contract.md) | Data ownership and frontend/backend contracts |
+| [D365 source guide](d365/README.md) · [Endpoints](docs/d365-endpoints.md) | Exact existing ERP tables, X++ contracts and three custom-service operations |
+| [Authentication](docs/linkedin-auth.md) · [AI behavior](docs/azure-openai.md) | LinkedIn selected-job return, HR sign-in and evidence validation |
+| [Operations](docs/deployment.md) · [Debugging](docs/debugging.md) · [Validation record](docs/validation.md) | Rollout, backups, recovery, terminal stages and executed verification |
 
-```mermaid
-flowchart LR
-    Browser[Candidate / HR browser] --> React[React portal]
-    React --> API[FastAPI]
-    API --> OIDC[LinkedIn OIDC]
-    API --> HRAuth[Environment HR credentials]
-    API --> D365[D365 custom services\nBusiness records]
-    API --> SQLite[SQLite portal metadata]
-    API --> Blob[Private resume storage]
-    API --> Queue[Redis jobs / sessions]
-    Queue --> Worker[Evaluation worker]
-    Worker --> Blob
-    Worker --> AI[Azure OpenAI\nComplete resume + job]
-    Worker --> D365
-    Worker --> SQLite
+The Word documents are generated from the Markdown references by `scripts/generate_reference_docs.py`. Screenshots use fictional demo identities and explicitly labeled sample evaluations.
+
+![Candidate application form with fictional demo identity](docs/screenshots/phase1-candidate-application.png)
+
+## What Phase 1 does
+
+- Shows eligible open ERP jobs and their full requirement details.
+- Returns LinkedIn sign-in to the chosen application, displays permitted profile fields, and collects confirmed contact details.
+- Validates PDF/DOCX uploads and consent, privately stores the document, freezes the JD/contact snapshot, and submits one stable application to F&O.
+- Extracts resume text, asks Azure OpenAI for contextual evidence, validates quoted sources, and attempts bounded correction of invalid model output.
+- Saves a complete validated result durably before delivering the selected score/evidence to `UBHRMatchEvaluationTable`; completion requires ERP acknowledgement.
+- Gives HR candidate lists, evidence, authorized resume access, refresh, and failed-evaluation retry. Candidates see application business status rather than internal AI diagnostics.
+
+History and HR lists include acknowledged portal submissions. Historic ERP applications and ERP-only recruiter edits are not automatically synchronized. Readable text PDF/DOCX is supported; OCR for scanned documents is future work.
+
+![HR evidence workspace with a fictional sample evaluation](docs/screenshots/phase1-hr-evidence.png)
+
+## Supabase instead of local SQLite
+
+The default is `METADATA_BACKEND=sqlite`. To use shared PostgreSQL metadata, migrate existing records explicitly and set backend-only settings:
+
+```dotenv
+METADATA_BACKEND=postgres
+DATABASE_URL=postgresql://YOUR_USERNAME:URL_ENCODED_PASSWORD@YOUR_ACTUAL_DATABASE_HOST:5432/postgres
+DATABASE_SSLMODE=verify-full
+DATABASE_SSLROOTCERT=
+DATABASE_CONNECT_TIMEOUT=10
+D365_CONTRACT_MODE=sqlite
 ```
 
-See [architecture and data ownership](docs/architecture.md) for the processing flow and [API contract](docs/api-contract.md) for frontend/backend interfaces.
+`D365_CONTRACT_MODE=sqlite` is the retained name of the lean three-operation **ERP contract**, independent of the metadata engine. No Supabase browser API key is needed. Follow [the migration guide](docs/supabase.md) before changing the backend.
 
-The [LinkedIn application form on desktop](docs/screenshots/linkedin-profile-desktop.png) and [mobile](docs/screenshots/linkedin-profile-mobile.png) show the returned profile and editable contact fields using a fictional browser-test identity.
+Do not run independent local workers against one shared database with different Redis servers. Use one active connected stack at a time, or deliberately share the same private Redis endpoint/prefix and Blob container across stacks. Database sharing alone does not coordinate queues or migrate document bytes.
 
-## Run locally
+## Native developer workflow
 
-Prerequisites: Git, Python 3.11+, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Node.js 22.12+ with npm. Docker is optional for the demo and required for the Compose workflow below. Connected evaluation requires Redis and a separate worker.
-
-```bash
-git clone https://github.com/SriTharoon05/UB_HRProcess_Agent.git
-cd UB_HRProcess_Agent
-```
-
-Install the locked dependencies:
+Prerequisites: Python 3.11+, [uv](https://docs.astral.sh/uv/getting-started/installation/), Node.js 22.12+ and npm. From the repository root:
 
 ```bash
 ./scripts/install.sh
-```
-
-The installer uses ignored local caches, so it also works in cloud environments with a read-only home directory. It installs development tests and the optional browser-test package; Chromium itself is installed separately when needed.
-
-![TalentMatch AI HR workspace in demo mode](docs/screenshots/hr-workspace.png)
-
-Create local configuration only when it does not already exist:
-
-```bash
-if [ ! -f backend/.env ]; then cp backend/.env.example backend/.env; fi
-if [ ! -f frontend/.env ]; then cp frontend/.env.example frontend/.env; fi
-```
-
-Keep `DEMO_MODE=true` and `APP_ENV=development` for the first run. The frontend uses same-origin API paths through Vite's development proxy; integration secrets belong only in the backend environment.
-
-```bash
 ./scripts/dev.sh
 ```
 
-Open **http://localhost:5173**. Use the labeled candidate demo sign-in, choose a job, and upload a text-based PDF or DOCX. For HR access, set `HR_USERNAME` and `HR_PASSWORD` in `backend/.env`, restart the backend, and enter them on `/hr/login`. Sample evaluation values are fixtures, not an Azure OpenAI result. API documentation is available at **http://localhost:8000/docs** in development.
+The native development script uses explicitly labeled demo mode at http://localhost:5173 with its own HTTP API on port 8000. Candidate demo access uses fictional fixtures; HR needs backend-only `HR_USERNAME` and `HR_PASSWORD`. The native demo is separate from the connected HTTPS Docker deployment.
 
-To run the processes in separate terminals:
+For your existing Windows native connected backend, keep Redis running and start these in separate `backend` terminals:
 
-```bash
-cd backend
-uv run --frozen uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 7242 --ssl-certfile .certs\localhost.pem --ssl-keyfile .certs\localhost-key.pem
 ```
 
-```bash
-cd frontend
-npm run dev -- --host 127.0.0.1 --port 5173
+```powershell
+.\.venv\Scripts\python.exe -m app.worker
 ```
 
-`uv` creates `backend/.venv`. For manual activation, use `source backend/.venv/bin/activate` on Linux/macOS or `backend\.venv\Scripts\Activate.ps1` in PowerShell; activation is unnecessary when using `uv run`.
+Start `npm run dev` from `frontend` and trust the issuing local CA for Node's Vite proxy using `NODE_EXTRA_CA_CERTS`. The default Vite proxy targets https://localhost:7242. Do not run the native port-7242 server simultaneously with the Docker gateway on that port.
 
-### Docker demo
+## ERP integration and secrets
 
-From the repository root:
+The source pack uses existing model `UBHR_Nive` and exactly these tables: `UBJobRequirementTable`, `UBCandidateTable`, `UBJobApplicationTable`, `UBHRMatchEvaluationTable`. The service group exposes `getOpenRequirements`, `submitApplication`, and `saveCandidateEvaluation` under `UBHRPortalServiceGroup/UBHRPortalService`.
 
-```bash
-docker compose up --build
-```
+Keep optional `D365_TOP_CANDIDATES_PATH`, `D365_MY_APPLICATIONS_PATH`, and `D365_APPLICATION_PATH` blank for the three-operation contract. Metadata history/detail/ranking is served by FastAPI; React never receives ERP/database secrets. Deployed F&O services must retain compatible identifiers, indexes, enums, acknowledgement contracts and Memo-field support.
 
-Open **http://localhost:5173**. Compose runs the frontend, API, and persistent Redis service. Its default is development/demo configuration. Stop it with `docker compose down`; omit `--volumes` to retain local queue/document volumes. This Compose setup is a development starting point, not a production deployment specification.
+Use ignored `backend/.env` for native development or root `.env` for Docker. Never commit actual `.env`, database backups, certificates, private resumes or exported image archives. Integration endpoints and credentials belong in backend runtime settings, never `VITE_` variables.
 
-### Connected evaluation worker
-
-Configure the backend environment, set `DEMO_MODE=false`, and provide Redis. Start the worker in a separate terminal:
-
-```bash
-cd backend
-uv run --frozen python -m app.worker
-```
-
-The API and worker must use the same backend environment, Redis instance/prefix, private storage configuration and durable SQLite file (`SQLITE_DATABASE_PATH`). Use one shared absolute local path/volume; do not run independent copies across hosts. Run Redis with persistence enabled; see [deployment](docs/deployment.md) for service isolation and recovery requirements. Demo evaluation does not require external model credentials or a connected worker.
-
-The repository also provides a [connected production Compose override](compose.production.yml) for use behind an HTTPS ingress; it requires live credentials/contracts and has not been validated against external services. Follow [deployment instructions](docs/deployment.md) before using it.
-
-## Environment and external integrations
-
-The complete variable reference is in [environment configuration](docs/environment.md); copy the committed examples and supply secrets through your environment settings or a secret manager. Do not commit real `.env` files or put credentials in `VITE_` variables. For stage-by-stage API/worker terminal logs, safe D365 diagnostics and PowerShell log capture, see [debugging](docs/debugging.md).
-
-| Integration | What is implemented | What you must configure/verify |
-| --- | --- | --- |
-| D365 requirements | Typed full-job read from existing `UBJobRequirementTable` | Build/deploy source, actual status symbols and integration-user company |
-| D365 submission | Stable application ID and atomic candidate/application write to existing screenshot tables | Existing unique indexes, EDT lengths, role permissions and live retry acceptance |
-| D365 evaluation | Three-operation core-result write to `UBHRMatchEvaluationTable` | Deploy `saveCandidateEvaluation` and configure its verified path |
-| Portal metadata/history/ranking | SQLite-backed frozen submissions, full evaluations and authorized reads | Shared durable local database, backups; existing F&O records/status edits are not imported |
-| LinkedIn | Backend OIDC authorization-code flow and session creation | Client credentials, enabled OIDC product, exact registered redirect URI |
-| HR authentication | Environment username/password login and server-side HR role authorization | Backend-only `HR_USERNAME` and `HR_PASSWORD` |
-| Azure OpenAI | Complete-document evidence prompt, structured output validation, evidence checks | Endpoint/key/deployment/API-version compatibility and live model smoke test |
-| Resume storage | Validated local development uploads and private Blob adapter | Private container, access controls, connection settings, retention/deletion policy |
-| Background jobs | Redis-backed processing, retries, idempotency coordination | Persistent private Redis, worker deployment and monitoring; D365 write contracts |
-
-No live external integration is claimed verified without its configured credentials/contracts. Missing connected integrations return useful errors instead of demo records.
-
-## D365 deployment handoff
-
-The [Visual Studio paste guide](d365/README.md) uses your existing model `UBHR_Nive` and the exact tables `UBJobRequirementTable`, `UBCandidateTable`, `UBJobApplicationTable`, `UBHRMatchEvaluationTable`. It provides five contracts, `UBHRPortalService`, three service operations, `UBHRPortalServiceGroup`, a Postman collection and backend settings. No new D365 tables, fields, EDTs or enums are proposed. [TABLES.md](d365/TABLES.md) lists all screenshot fields and the smaller selected field set; paste classes from [d365/xpp](d365/xpp).
-
-With `D365_CONTRACT_MODE=sqlite`, only `getOpenRequirements`, `submitApplication` and `saveCandidateEvaluation` call F&O. SQLite keeps timestamps, document references/checksums, consent, validated LinkedIn profile, frozen JD/contact snapshots, retries and complete AI provenance/evidence. Existing F&O metadata fields are left unchanged. Actual resumes remain private blobs; Redis still queues connected work.
-
-After building/deploying the service group, merge [d365/backend.env.example](d365/backend.env.example) into ignored `backend/.env`. D365 endpoints/credentials belong there; React continues calling FastAPI. X++ compilation, any required index/EDT synchronization, and live serializer/security acceptance must occur in your F&O development environment. The source folder is not a compiled model/package.
-
-History/detail/ranking include only acknowledged portal submissions. They do not synchronize external F&O recruiter status changes; the portal currently retains its initial human-review `Submitted` snapshot. HR status editing, cross-system deletion and multi-host database scaling need separately reviewed capabilities. The `legacy` adapter remains available for an explicitly configured older six-operation service; it is not the default source pack.
-
-## Test and build
+## Verification and production boundary
 
 ```bash
 ./scripts/check.sh
 ```
 
-Or run the checks separately:
+The checks cover backend tests, lint, typed frontend tests/build and ERP bundle contracts. Browser verification uses synthetic uploads and fictional demo data. See [the current validation record](docs/validation.md) for executed results and limitations. Local tests do not replace live provider/F&O acceptance.
 
-```bash
-(cd backend && uv run --frozen --extra dev python -m pytest)
-(cd backend && uv run --frozen --extra dev ruff check app tests ../scripts/smoke.py)
-(cd backend && uv run --frozen python ../d365/validate_bundle.py)
-(cd frontend && npm run lint)
-(cd frontend && npm run typecheck)
-(cd frontend && npm run test)
-(cd frontend && npm run build)
-```
-
-Automated tests mock external services and do not need real credentials. Production builds are written to `frontend/dist`. CI runs the locked installation, repository checks, and demo browser workflow. A successful local build/test validates the application code and mocked contracts; external registration, deployed X++, networking, and Azure permissions still require live acceptance checks.
-
-See [validation results](docs/validation.md) for the executed checks and remaining live integration requirements.
-
-### Browser smoke test
-
-With `./scripts/dev.sh` running in demo mode, use another terminal:
-
-```bash
-cd backend
-uv run --frozen --extra e2e playwright install chromium
-uv run --frozen --extra e2e python ../scripts/smoke.py
-```
-
-If Chromium is already installed, the script discovers `chromium` or accepts `CHROMIUM_PATH=/path/to/chromium`; then the browser-install step is unnecessary. `SMOKE_BASE_URL` can select a different running demo origin. The test generates a synthetic PDF, submits a fictional application, checks candidate history and HR access/evidence, downloads the private resume, and checks mobile navigation and browser errors. It creates only demo/local test data and never calls live D365 or Azure services.
-
-## Security and production
-
-Sessions use backend cookies; role and candidate ownership checks run in FastAPI. State-changing browser requests require CSRF protection. Documents stay private and HR downloads are authorized. The API validates upload size and actual PDF/DOCX content; scanned/empty documents need OCR and are not given fabricated text. Scores, labels, and explanations are decision support and can be wrong; missing evidence does not prove missing ability.
-
-Deploy behind HTTPS with explicit allowed origins, production cookies, demo disabled, private Redis/Blob networking, secrets supplied by a manager such as Azure Key Vault, a separately supervised worker, and coordinated retention controls. See [production deployment](docs/deployment.md), [LinkedIn and HR authentication](docs/linkedin-auth.md), and [Azure OpenAI evaluation](docs/azure-openai.md).
+This Phase 1 release includes production-mode configuration and operational packaging, not a guarantee of complete enterprise readiness. Broader rollout requires approved HR identity/roles, live integration permissions, document-security policy, retention, monitoring, tested backup/restore and capacity planning. Human employment decisions remain with HR.
 
 ## Repository map
 
 ```text
-backend/       FastAPI, configuration, auth, integrations, worker, tests
-frontend/      React portal, reusable UI, typed API client, tests
-docs/          Architecture, API/D365 contracts, integration and deployment guides
-scripts/       Locked installation, startup, verification, and browser smoke test
-compose.yml    Development containers and Redis persistence
-compose.production.yml   Connected services behind your HTTPS ingress
-.github/       Automated checks
+backend/                  FastAPI, authentication, integrations, metadata, worker, tests
+frontend/                 React portal, shared UI, typed API, tests
+d365/                     Existing-table X++ source pack and serialized fixtures
+deploy/docker/            Source-free runtime templates and recipient scripts
+scripts/docker/           Build, local setup, image export and portability helpers
+scripts/                  Installation, developer startup, checks, docs and browser smoke
+docs/                     Technical/business references, operations, guides and screenshots
+docs/reference/           Shareable generated Word documents
+compose.yml               Localhost HTTPS connected application group
+compose.build.yml         Source-based image build definitions
+compose.demo.yml          Explicit fictional development/demo override
+.github/                  Automated checks
 ```
-
-For changes in an existing Codex cloud task, use the provided isolated checkout. A separate Git worktree is unnecessary unless explicitly requested.

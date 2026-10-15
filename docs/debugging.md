@@ -42,12 +42,12 @@ uv run --frozen python -m app.worker 2>&1 |
     Tee-Object -FilePath .local\worker-debug.log
 ```
 
-Keep Redis running and use the same environment and SQLite database path in both processes. A successful API submission cannot progress through connected AI review without the worker. The PowerShell pipeline is for displaying/capturing logs; use the process output to diagnose startup failures rather than treating the pipeline's success as proof that the server started.
+Keep Redis running and use the same environment and metadata backend/connection in both processes. SQLite processes must resolve the same durable file; PostgreSQL processes must use the same database. A successful API submission cannot progress through connected AI review without the worker. The PowerShell pipeline is for displaying/capturing logs; use the process output to diagnose startup failures rather than treating the pipeline's success as proof that the server started.
 
 On an existing deployment, inspect the API and worker service logs separately. For the connected Compose arrangement:
 
 ```bash
-docker compose -f compose.yml -f compose.production.yml --profile connected logs --follow api worker
+docker compose logs --follow api worker
 ```
 
 ## Read a processing trace
@@ -130,3 +130,7 @@ For a retained failed evaluation, repair the identified configuration/service pr
 Application logs omit OAuth codes/state query values, cookies, authorization headers, secrets, raw request/response bodies, resume text, AI prompts/results, candidate names/contact details, and storage object references. The Uvicorn access-log filter removes query strings; ARQ job logging avoids raw job arguments and result dumps. Unexpected application exceptions retain safe code locations and the exception type rather than the arbitrary exception value. The application's DEBUG setting does not enable verbose HTTP SDK wire logging.
 
 Request, application, correlation, and activity IDs remain operational identifiers. Review the relevant trace before sharing it, restrict log-file access, and apply your deployment's log retention policy. `.local` and `*.log` files are ignored by Git.
+
+## Portable Docker logs
+
+The source-free runtime bundle uses root `.env`; run its start wrapper after editing settings so containers are recreated. Open Docker Desktop service logs or run `docker compose logs --follow api worker`. The visible portal/health URL is `https://localhost:7242` (`/api/health`). A database/PostgreSQL connection failure is separate from the LLM and ERP stages. Do not print `DATABASE_URL`, `.env` or container environment dumps while collecting logs.

@@ -14,14 +14,14 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from app.errors import IntegrationError
-from app.metadata import SQLiteMetadata, encode
+from app.metadata import MetadataStore, encode
 from app.observability import log_context, log_event, stage, traced
 
 class SubmissionCoordinator:
     def __init__(self, settings, adapter, resumes, redis=None):
         self.settings, self.adapter, self.resumes, self.redis = settings, adapter, resumes, redis
         metadata = getattr(adapter, "metadata", None)
-        self.metadata = metadata if isinstance(metadata, SQLiteMetadata) else None
+        self.metadata = metadata if isinstance(metadata, MetadataStore) else None
         self.memory = {}
         self.locks = {}
 
@@ -47,7 +47,7 @@ class SubmissionCoordinator:
     @traced("submission.outbox_persist")
     async def persist(self, key, record):
         log_event("submission.outbox_state", "saving", state=record.get("stage"),
-                  storage="sqlite" if self.metadata else "redis" if self.redis else "memory")
+                  storage=self.metadata.storage_name if self.metadata else "redis" if self.redis else "memory")
         if self.metadata:
             await self.metadata.update_submission(key, record)
             return

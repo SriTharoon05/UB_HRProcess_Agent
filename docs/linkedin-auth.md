@@ -9,12 +9,12 @@ Enable **Sign In with LinkedIn using OpenID Connect** for the LinkedIn developer
 ```dotenv
 LINKEDIN_CLIENT_ID=
 LINKEDIN_CLIENT_SECRET=
-LINKEDIN_REDIRECT_URI=http://localhost:8000/auth/linkedin/callback
+LINKEDIN_REDIRECT_URI=https://localhost:7242/auth/linkedin/callback
 LINKEDIN_ISSUER=https://www.linkedin.com/oauth
 LINKEDIN_DISCOVERY_URL=https://www.linkedin.com/oauth/.well-known/openid-configuration
 ```
 
-The localhost URI is a local example. Enter the **exact** redirect URI already registered for your application, including scheme, host, port, and path. If browsing through a same-origin proxy, register the externally visible callback; the internal container hostname is not a browser callback. Production callbacks must use HTTPS.
+The connected local deployment uses this exact registered HTTPS callback. Keep scheme, localhost host, port 7242 and path unchanged. If browsing through a same-origin proxy, register the externally visible callback; the internal container hostname is not a browser callback. Production callbacks must use HTTPS.
 
 The application requests the fixed required scopes `openid profile email`. There is no configurable scope variable that pretends to enable extra LinkedIn data. Those scopes provide basic identity only; phone numbers, profile URLs, employment history, projects, and skills are not guaranteed. Optional contact information comes from the application form; work evidence comes from the uploaded resume.
 
@@ -52,11 +52,11 @@ The browser callback contains `code` and `state`. FastAPI exchanges the code on 
 
 This is an illustrative public-profile object, not a guaranteed LinkedIn response. Unavailable optional fields are null. The form displays only available name, given/family name, valid email and its supplied verification status, permitted HTTPS LinkedIn photo, locale, and the separate account identifier. An opaque identifier such as `urn:li:member:...` is never an email prefill or an inferred public profile URL. Provider access/ID/refresh tokens and arbitrary raw claims are not included.
 
-Before submission, the candidate confirms the editable full name and contact email, fills optional phone/profile URL, uploads a resume, and accepts consent. The authenticated issuer/subject remain fixed. The D365 submission includes the confirmed contact details and a separate optional provider-profile snapshot. Candidate/application persistence must complete before an `ApplicationId` is acknowledged and evaluation is queued. The worker saves resume/JD matching results through the separate evaluation service, linked by that identifier. See [D365 contracts](d365-endpoints.md).
+Before submission, the candidate confirms the editable full name and contact email, fills optional phone/profile URL, uploads a resume, and accepts consent. The authenticated issuer/subject remain fixed. The lean D365 submission includes confirmed contact fields and verified identity; the sanitized provider-profile snapshot remains in portal metadata. Candidate/application persistence must complete before an `ApplicationId` is acknowledged and evaluation is queued. The worker saves resume/JD matching results through the separate evaluation service, linked by that identifier. See [D365 contracts](d365-endpoints.md).
 
 ## HR username/password
 
-Configure `HR_USERNAME` and `HR_PASSWORD` in `backend/.env` or backend runtime secrets, then restart the API. Both must be set; there is no default account. Enter them on `/hr/login`. Matching is exact and case-sensitive; the username is not required to be a public email address.
+Configure `HR_USERNAME` and `HR_PASSWORD` in native `backend/.env`, portable Docker root `.env`, or backend runtime secrets, then restart the API. Both must be set; there is no default account. Enter them on `/hr/login`. Matching is exact and case-sensitive; the username is not required to be a public email address.
 
 The backend checks both credentials, assigns the HR role, and rotates the opaque session and CSRF token. Existing HR API and private resume authorization checks apply. `HR_LOGIN_RATE_LIMIT` defaults to five attempts per client per minute. Missing configuration returns 503; incorrect credentials return a generic 401. Credentials are excluded from terminal logs and browser storage. D365's service-app credentials are separate and remain required.
 

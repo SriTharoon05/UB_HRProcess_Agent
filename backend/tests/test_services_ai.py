@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.errors import ConfigurationError, IntegrationError
 from app.models import Job
-from app.services.ai import AIService, Assessment, redact_identity
+from app.services.ai import AIService, Assessment, redact_identity, source_quote
 
 
 def response(evidence="Built Python APIs.", score=73):
@@ -119,3 +119,58 @@ async def test_oversized_resume_fails_instead_of_truncating(settings):
     with pytest.raises(IntegrationError, match="No text was truncated"):
         await AIService(settings, client=client).evaluate("Complete resume with extensive projects.", Job(requirement_id="REQ-1", title="Engineer", required_skills=["Python"]))
     parse.assert_not_awaited()
+
+
+@pytest.mark.parametrize("quote,source,expected", [
+    ("Built Python APIs.", "Portal\nBuilt Python\n    APIs.", "Built Python\n    APIs."),
+    ("Built Python APIs.", "Built Python\u00a0APIs.", "Built Python\u00a0APIs."),
+    ("Built Azure APIs.", "Built Python APIs.", ""),
+    ("3 years", "13 years", ""),
+    ("Built APIs", "Built APIsExtra", ""),
+    ("Built ... APIs.", "Built Python APIs.", ""),
+    ("Built APIs.", "Built APIs.", "Built APIs."),
+])
+def test_source_quotes_only_allow_whitespace_and_preserve_original_span(quote, source, expected):
+    assert source_quote(quote, source) == expected
+
+
+async def test_pdf_line_wrapping_is_restored_in_saved_evidence(settings):
+    client, parse = client_for(response())
+    result = await AIService(settings, client=client).evaluate(
+        "Portal\nBuilt Python\n   APIs.", Job(requirement_id="REQ-1", title="Engineer", required_skills=["Python"]))
+    assert result.score == 73
+    assert result.matched_requirements[0].evidence == "Built Python\n   APIs."
+    parse.assert_awaited_once()
+
+
+async def test_invalid_evidence_gets_bounded_correction_with_full_original_inputs(settings):
+    client, parse = client_for(None)
+    def completion(data):
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=data, refusal=None))])
+    parse.side_effect = [completion(response("Invented implementation.")), completion(response(score=64))]
+    result = await AIService(settings, client=client).evaluate(
+        "Portal\nBuilt Python APIs.", Job(requirement_id="REQ-1", title="Engineer", required_skills=["Python"]))
+    assert result.score == 64 and parse.await_count == 2
+    first, second = [call.kwargs["messages"] for call in parse.await_args_list]
+    assert first[1] == second[1] and len(first) == 2 and len(second) == 3
+    assert "Invented implementation" not in second[-1]["content"]
+    assert "contiguous quote" in second[-1]["content"]
+
+
+async def test_repeated_invalid_output_stops_at_configured_limit(settings):
+    settings.azure_openai_validation_attempts = 2
+    client, parse = client_for(response("Invented implementation."))
+    with pytest.raises(IntegrationError, match="exact resume quote"):
+        await AIService(settings, client=client).evaluate(
+            "Portal\nBuilt Python APIs.", Job(requirement_id="REQ-1", title="Engineer", required_skills=["Python"]))
+    assert parse.await_count == 2
+
+
+async def test_weak_match_with_zero_score_and_explained_gaps_is_valid(settings):
+    data = response(score=0)
+    data.update(matched_requirements=[], relevant_evidence=[], match_label="InsufficientEvidence")
+    client, parse = client_for(data)
+    result = await AIService(settings, client=client).evaluate(
+        "Office administration and spreadsheet reporting.", Job(requirement_id="REQ-1", title="Engineer", required_skills=["Python"]))
+    assert result.score == 0 and result.match_label == "InsufficientEvidence" and result.not_evidenced_requirements
+    parse.assert_awaited_once()

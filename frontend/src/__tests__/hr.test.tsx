@@ -57,6 +57,15 @@ describe('HR workspace', () => {
 function renderRanking() {return renderPage(<CandidateRankingPage />, {path: `/hr/jobs/${engineeringJob.requirement_id}/candidates`, route: '/hr/jobs/:requirementId/candidates'});}
 
 describe('job-scoped candidate ranking', () => {
+  it('refreshes the selected job candidates when HR requests an update', async () => {
+    renderRanking();
+    const refresh = await screen.findByRole('button', {name: 'Refresh list'});
+    await waitFor(() => expect(refresh).toBeEnabled());
+    await userEvent.click(refresh);
+    await waitFor(() => expect(api.candidates).toHaveBeenCalledTimes(2));
+    expect(api.candidates).toHaveBeenLastCalledWith(engineeringJob.requirement_id);
+  });
+
   it('fetches only the selected job and sorts scored profiles while keeping pending records last', async () => {
     vi.mocked(api.candidates).mockResolvedValue(candidateResponse([pendingCandidate, lowerCandidate, highCandidate]));
     renderRanking();
@@ -107,6 +116,30 @@ describe('job-scoped candidate ranking', () => {
 function renderDetail() {return renderPage(<CandidateDetailPage />, {path: `/hr/jobs/${engineeringJob.requirement_id}/candidates/${highCandidate.application_id}`, route: '/hr/jobs/:requirementId/candidates/:applicationId'});}
 
 describe('candidate evidence review', () => {
+  it('queues a failed evaluation only once and refreshes its current status', async () => {
+    const failed = {...pendingCandidate, ai_status: 'Failed'};
+    const request = deferred<{success: boolean; application_id: string; ai_status: string; message: string}>();
+    vi.mocked(api.candidate).mockResolvedValueOnce(failed).mockResolvedValue({...failed, ai_status: 'Queued'});
+    const retry = vi.spyOn(api, 'retryEvaluation').mockReturnValue(request.promise);
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', {name: 'Retry evaluation'}));
+    expect(screen.getByRole('button', {name: 'Queueing…'})).toBeDisabled();
+    expect(retry).toHaveBeenCalledExactlyOnceWith(engineeringJob.requirement_id, highCandidate.application_id);
+    await act(async () => request.resolve({success: true, application_id: failed.application_id, ai_status: 'Queued', message: 'Evaluation queued'}));
+    expect(await screen.findByText('The evidence is still coming together')).toBeVisible();
+    expect(screen.queryByRole('button', {name: 'Retry evaluation'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', {name: /out of 100/})).not.toBeInTheDocument();
+  });
+
+  it('keeps retry available and shows a retry request failure to HR', async () => {
+    vi.mocked(api.candidate).mockResolvedValue({...pendingCandidate, ai_status: 'Failed'});
+    vi.spyOn(api, 'retryEvaluation').mockRejectedValue(new Error('Evaluation queue temporarily unavailable'));
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', {name: 'Retry evaluation'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Evaluation queue temporarily unavailable');
+    expect(screen.getByRole('button', {name: 'Retry evaluation'})).toBeEnabled();
+  });
+
   it('ties evaluation to both job and application and exposes source evidence, partial support, and gaps', async () => {
     const user = userEvent.setup();
     renderDetail();

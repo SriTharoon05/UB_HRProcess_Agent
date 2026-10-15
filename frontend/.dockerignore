@@ -5,3 +5,6 @@ dist
 !.env.example
 coverage
 test-results
+.certs
+*.pem
+*.key

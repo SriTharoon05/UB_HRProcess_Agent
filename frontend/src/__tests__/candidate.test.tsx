@@ -354,4 +354,15 @@ describe('candidate status visibility', () => {
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
     expect(screen.getByText(/The recruitment team will review your details and resume/)).toBeVisible();
   });
+
+  it('keeps failed internal processing private while confirming the candidate application', async () => {
+    const internalProcessingRecord = {...highCandidate, ai_status: 'Failed', evaluation: null};
+    vi.mocked(api.application).mockResolvedValue(internalProcessingRecord);
+    renderPage(<ApplicationDetailPage />, {path: `/candidate/applications/${highCandidate.application_id}`, route: '/candidate/applications/:applicationId'});
+    expect(await screen.findByText('Your application is received')).toBeVisible();
+    expect(screen.getByText('Submitted')).toBeVisible();
+    expect(screen.queryByText('Failed')).not.toBeInTheDocument();
+    expect(screen.queryByText('AI processing')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: 'Retry evaluation'})).not.toBeInTheDocument();
+  });
 });

@@ -7,3 +7,7 @@ __pycache__
 .data
 data
 tests
+.certs
+*.pem
+*.key
+*.sqlite*
