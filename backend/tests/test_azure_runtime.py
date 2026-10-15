@@ -45,6 +45,7 @@ def test_public_production_origin_and_postgres_are_accepted(monkeypatch, tmp_pat
     ({"linkedin_redirect_uri": "https://portal.example.test/wrong"}, "LINKEDIN_REDIRECT_URI"),
     ({"hr_password": ""}, "HR_USERNAME and HR_PASSWORD"),
     ({"database_sslmode": "disable"}, "verify-full"),
+    ({"database_sslmode": "require"}, "verify-full"),
 ])
 def test_unsafe_or_incomplete_hosted_configuration_is_rejected_without_values(monkeypatch, changes, message):
     monkeypatch.setattr("app.config.get_settings", lambda: production(**changes))

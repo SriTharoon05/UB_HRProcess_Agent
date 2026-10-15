@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     sqlite_database_path: Path = Path(".local/talentmatch.sqlite3")
     metadata_backend: Literal["sqlite", "postgres"] = "sqlite"
     database_url: str = Field(default="", repr=False, max_length=4096)
-    database_sslmode: Literal["verify-full", "disable"] = "verify-full"
+    database_sslmode: Literal["verify-full", "require", "disable"] = "verify-full"
     database_sslrootcert: Path | None = None
     database_connect_timeout: int = Field(default=10, ge=1, le=60)
     d365_enabled: bool = False

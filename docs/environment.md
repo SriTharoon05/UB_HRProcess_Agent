@@ -96,8 +96,8 @@ The selected metadata engine stores the frozen application/profile/consent/docum
 | --- | --- | --- |
 | `METADATA_BACKEND` | `sqlite` | `sqlite` local shared-volume storage or `postgres` server database |
 | `DATABASE_URL` | Empty | Backend-only PostgreSQL URI; required for `postgres` and explicit migration target |
-| `DATABASE_SSLMODE` | `verify-full` | Verify database certificate chain and hostname; disable is restricted to loopback testing |
-| `DATABASE_SSLROOTCERT` | Empty | Optional runtime-visible database CA path; empty uses OS trust |
+| `DATABASE_SSLMODE` | `verify-full` | `verify-full` verifies database certificate/hostname; temporary native/local `require` encrypts without those checks; Azure production requires `verify-full`; `disable` is loopback-only |
+| `DATABASE_SSLROOTCERT` | Empty | Optional runtime-visible CA path for `verify-full`; empty uses system trust; ignored with `require` |
 | `DATABASE_CONNECT_TIMEOUT` | `10` | Database connection timeout, 1–60 seconds |
 
 Use the actual Supabase Connect dialog's direct/session/transaction-pooler URI, URL-encode password delimiters, and keep it out of frontend/Git/logs. No Supabase API URL/anon/service-role key is used by this driver. The dedicated `talentmatch` schema has versioned metadata tables and RLS with no public policies/grants. See [Supabase setup and migration](supabase.md) before changing the backend.

@@ -2,6 +2,28 @@
 
 Supabase PostgreSQL can replace the local SQLite **metadata store**. F&O continues to own jobs/candidates/applications/core evaluations; private Azure Blob continues to store original documents; Redis continues to hold sessions, queues and locks. The frontend still calls FastAPI; it never receives database credentials or Supabase keys.
 
+## Quick native/local migration with an existing backup
+
+If you have already created `.local/talentmatch-backup.sqlite3`, stop the API and worker, keep your complete Supabase Session pooler `DATABASE_URL`, and set these values in `backend/.env`:
+
+```dotenv
+METADATA_BACKEND=sqlite
+DATABASE_SSLMODE=require
+DATABASE_SSLROOTCERT=
+```
+
+`require` is an explicit temporary option: the database connection is still TLS-encrypted, but the server certificate and hostname are not verified. It needs no downloaded CA certificate. The default remains `verify-full`, which is required for Azure production deployment.
+
+From the native `backend` folder, import directly:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.migrate_metadata --source .local\talentmatch-backup.sqlite3
+```
+
+No separate diagnostic or dry-run command is required. The import still checks source integrity and preserves transaction/conflict protections. After it succeeds, set `METADATA_BACKEND=postgres` and restart both the API and worker with the same `.env`. Keep `D365_CONTRACT_MODE=sqlite` unchanged. Existing LinkedIn callbacks remain `https://localhost:7242/auth/linkedin/callback`.
+
+Use the detailed steps below when preparing a new database or a verified production connection.
+
 ## 1. Create the database and copy its real connection string
 
 1. Create a Supabase project in the organization-approved region and set a strong database password. Keep that password in your approved secret store.
@@ -28,7 +50,7 @@ DATABASE_SSLROOTCERT=
 DATABASE_CONNECT_TIMEOUT=10
 ```
 
-`DATABASE_URL` above is a template: use the exact Connect-dialog username/host. `DATABASE_SSLMODE=verify-full` validates the certificate chain and hostname. If the database's issuer is absent from the runtime's OS trust, download the trusted database CA from the provider's documented location and set `DATABASE_SSLROOTCERT` to its **runtime-visible** path. A Windows path cannot be used directly inside a Linux container; mount the CA file read-only and point the setting to the container path. Do not set TLS verification off to resolve a certificate error.
+`DATABASE_URL` above is a template: use the exact Connect-dialog username/host. `DATABASE_SSLMODE=verify-full` validates the certificate chain and hostname. If the database's issuer is absent from the runtime's OS trust, download the trusted database CA from the provider's documented location and set `DATABASE_SSLROOTCERT` to its **runtime-visible** path. A Windows path cannot be used directly inside a Linux container; mount the CA file read-only and point the setting to the container path. For temporary native/local use, the explicit `require` setting described above skips server identity verification while retaining TLS encryption; it is not accepted by the Azure production preflight. Leave `DATABASE_SSLROOTCERT` blank with `require` so no custom CA setup is needed.
 
 The CA bundle is public trust material, not a database secret. A private CA signing key is not needed. Local Docker's HTTPS localhost CA and the Supabase database CA serve different connections.
 
@@ -75,9 +97,9 @@ docker compose run --rm --no-deps --user 0:0 --cap-add DAC_OVERRIDE --volume "${
 
 Keep the output folder private. The migration command below reads the existing database in the shared volume; a Windows source path needs an explicit bind mount. To move native history into that volume before migration, use the [first-start restore procedure](docker-local.md#preserve-native-sqlite-history-before-the-first-docker-start).
 
-## 5. Dry-run source validation
+## 5. Optional dry-run source validation
 
-From native `backend`, first add `DATABASE_URL` and TLS settings but keep `METADATA_BACKEND=sqlite` until the import has succeeded:
+From native `backend`, add `DATABASE_URL` and TLS settings but keep `METADATA_BACKEND=sqlite` until the import has succeeded. Optionally validate the source before importing:
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.migrate_metadata --source .local\talentmatch.sqlite3 --dry-run
@@ -95,7 +117,7 @@ The source path must match the persisted database path in your bundle. Keep the 
 
 ## 6. Import transactionally
 
-Remove only `--dry-run`:
+Run the import directly, or remove `--dry-run` from the optional validation command:
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.migrate_metadata --source .local\talentmatch.sqlite3

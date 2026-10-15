@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
 import psycopg
@@ -44,7 +46,7 @@ class PostgresMetadata:
                         raise ValueError
         except (ValueError, psycopg.ProgrammingError):
             raise ConfigurationError(
-                "PostgreSQL requires a valid DATABASE_URL and verified TLS; disabled TLS is allowed only for localhost"
+                "PostgreSQL requires a valid DATABASE_URL and TLS; disabled TLS is allowed only for localhost"
             ) from None
         self._url = settings.database_url
         self._options = {
@@ -56,6 +58,13 @@ class PostgresMetadata:
         }
         if settings.database_sslmode == "verify-full":
             self._options["sslrootcert"] = str(settings.database_sslrootcert) if settings.database_sslrootcert else "system"
+        elif settings.database_sslmode == "require":
+            # libpq otherwise verifies a CA inherited from the URL, environment,
+            # or ~/.postgresql/root.crt even in require mode. An absent CA in a
+            # private directory makes this explicit encryption-only setting work
+            # consistently without changing the process environment.
+            self._unverified_ca_directory = TemporaryDirectory(prefix="talentmatch-noverify-")
+            self._options["sslrootcert"] = str(Path(self._unverified_ca_directory.name) / "unused-ca.pem")
         self._initialized = False
 
     @contextmanager

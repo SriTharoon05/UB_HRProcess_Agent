@@ -9,8 +9,11 @@ import copy
 import hashlib
 import os
 import sqlite3
+from pathlib import Path
+from unittest.mock import MagicMock
 from urllib.parse import urlsplit
 
+import psycopg
 import pytest
 from fastapi import HTTPException
 
@@ -201,6 +204,41 @@ def test_dotenv_optional_certificate_blank_uses_system_trust(tmp_path, blank):
     settings = Settings(_env_file=env, database_url="postgresql://user:private@pooler.example/postgres")
     assert settings.database_sslrootcert is None
     assert PostgresMetadata(settings)._options["sslrootcert"] == "system"
+
+
+@pytest.mark.parametrize("configured_ca", [False, True])
+def test_explicit_require_ignores_inherited_certificates_and_requires_encryption(
+    monkeypatch, tmp_path, caplog, configured_ca,
+):
+    certificate = tmp_path / "old-ca.pem"
+    certificate.write_text("previously configured certificate that must not be loaded")
+    monkeypatch.setenv("PGSSLROOTCERT", str(certificate))
+    monkeypatch.setenv("PGSSLMODE", "verify-full")
+    secret = "never-log-this-database-password"
+    url = f"postgresql://user:{secret}@pooler.example/postgres?sslmode=verify-full&sslrootcert=system"
+    settings = Settings(_env_file=None, metadata_backend="postgres", database_url=url,
+                        database_sslmode="require", database_sslrootcert=certificate if configured_ca else None)
+    store = PostgresMetadata(settings)
+    connect = MagicMock()
+    monkeypatch.setattr(psycopg, "connect", connect)
+
+    with store.connection():
+        pass
+
+    connect.assert_called_once_with(url, **store._options)
+    options = connect.call_args.kwargs
+    # Check libpq's effective options after URI/keyword merging, not only Settings.
+    libpq_options = psycopg.conninfo.conninfo_to_dict(psycopg.conninfo.make_conninfo(
+        url, **{key: value for key, value in options.items() if key != "prepare_threshold"},
+    ))
+    assert libpq_options["sslmode"] == "require"
+    ca = Path(libpq_options["sslrootcert"])
+    assert ca.is_absolute() and ca.parent.is_dir() and not ca.exists()
+    assert ca != certificate
+    assert options["prepare_threshold"] is None
+    assert os.environ["PGSSLROOTCERT"] == str(certificate)
+    assert os.environ["PGSSLMODE"] == "verify-full"
+    assert secret not in caplog.text
 
 
 async def source_database(tmp_path, *, two=False):
