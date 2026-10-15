@@ -30,8 +30,7 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dialog, setDialog] = useState<"help" | "notifications" | null>(null);
   const [search, setSearch] = useState("");
-  const hr =
-    location.pathname.startsWith("/hr") && location.pathname !== "/hr/login";
+  const hr = /^\/hr(?:\/|$)/.test(location.pathname);
   const user = session?.user;
   const displayName =
     user?.name.trim() || (user?.role === "hr" ? "HR team" : "Candidate");
@@ -90,10 +89,25 @@ export function AppShell() {
     }
   }
   return (
-    <div className="app-frame">
+    <div className={`app-frame ${hr ? "workspace-frame" : "careers-frame"}`}>
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
+      {!hr && (
+        <header className="careers-masthead">
+          <Brand />
+          <nav aria-label="Careers navigation">
+            <NavLink to="/" end>
+              Discover
+            </NavLink>
+            <NavLink to="/jobs">Open roles</NavLink>
+            <NavLink to="/candidate/applications">My applications</NavLink>
+          </nav>
+          <span className="careers-trust">
+            <ShieldCheck size={15} /> Your next chapter, securely.
+          </span>
+        </header>
+      )}
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
           <Brand />
@@ -148,10 +162,12 @@ export function AppShell() {
             <CircleHelp size={18} />
             Help & guidance
           </button>
-          <NavLink className="nav-item" to={hr ? "/" : "/hr/login"}>
-            <ShieldCheck size={18} />
-            {hr ? "Candidate portal" : "HR workspace"}
-          </NavLink>
+          {hr && (
+            <NavLink className="nav-item" to="/">
+              <ShieldCheck size={18} />
+              Candidate portal
+            </NavLink>
+          )}
           {user && (
             <button
               className="nav-item logout-link"
@@ -224,13 +240,22 @@ export function AppShell() {
               <Bell size={16} />
             </button>
             <span className="topbar-divider" />
+            {!hr && user && (
+              <button
+                className="round-button"
+                aria-label="Sign out"
+                onClick={() => { void handleLogout(); }}
+              >
+                <LogOut size={16} />
+              </button>
+            )}
             {user ? (
               <div className="user-chip">
                 <Avatar name={displayName} size="sm" />
                 <div>
                   <strong>{displayName}</strong>
                   <span>
-                    {user.role === "hr" ? "HR workspace" : "Candidate"}
+                    {hr ? "Recruitment team" : "Signed in"}
                   </span>
                 </div>
               </div>
@@ -279,7 +304,7 @@ export function AppShell() {
         description={
           dialog === "notifications"
             ? "Application updates are available in your workspace."
-            : "TalentMatch connects candidates and opportunities through evidence and human judgment."
+            : `${appName} connects your experience with opportunities to make a difference.`
         }
       >
         {dialog === "notifications" ? (
@@ -306,12 +331,15 @@ export function AppShell() {
               Browse open roles, sign in with LinkedIn, and submit your resume
               with consent. Your application status stays in My applications.
             </p>
-            <h4>For recruitment teams</h4>
-            <p>
-              Sign in with your organization’s HR identity to review job
-              requirements and contextual resume evidence. Hiring decisions
-              remain with your team.
-            </p>
+            {hr && (
+              <>
+                <h4>For recruitment teams</h4>
+                <p>
+                  Review job requirements and contextual resume evidence in your
+                  authorized workspace. Hiring decisions remain with your team.
+                </p>
+              </>
+            )}
             <h4>Your information</h4>
             <p>
               Your resume and application details are shared with the

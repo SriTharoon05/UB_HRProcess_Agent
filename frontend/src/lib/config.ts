@@ -1,2 +1,2 @@
 export const appName =
-  import.meta.env.VITE_APP_NAME?.trim() || "TalentMatch AI";
+  import.meta.env.VITE_APP_NAME?.trim() || "UBTI Careers";

@@ -448,25 +448,25 @@ export function HRDashboardPage() {
                       <CartesianGrid
                         strokeDasharray="3 3"
                         vertical={false}
-                        stroke="#e6e4ef"
+                        stroke="#e0eaf1"
                       />
                       <XAxis
                         dataKey="range"
-                        tick={{ fontSize: 10, fill: "#9591a5" }}
+                        tick={{ fontSize: 10, fill: "#60788d" }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <YAxis
                         allowDecimals={false}
-                        tick={{ fontSize: 10, fill: "#9591a5" }}
+                        tick={{ fontSize: 10, fill: "#60788d" }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <Tooltip
-                        cursor={{ fill: "#eeebfa" }}
+                        cursor={{ fill: "#edf5fa" }}
                         contentStyle={{
                           borderRadius: 10,
-                          border: "1px solid #e9e5f5",
+                          border: "1px solid #dce7ef",
                           fontSize: 12,
                         }}
                       />
@@ -474,7 +474,7 @@ export function HRDashboardPage() {
                         isAnimationActive={false}
                         dataKey="count"
                         name="Returned profiles"
-                        fill="#8871e8"
+                        fill="#087db2"
                         radius={[5, 5, 0, 0]}
                         barSize={28}
                       />

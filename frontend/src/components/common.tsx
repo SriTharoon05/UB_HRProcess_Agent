@@ -10,7 +10,6 @@ import {
   LoaderCircle,
   MapPin,
   RefreshCw,
-  Sparkles,
   Star,
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -24,7 +23,7 @@ export function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <Link to="/" className="brand" aria-label={`${appName} home`}>
       <span className="brand-mark">
-        <Sparkles size={20} fill="currentColor" />
+        <span aria-hidden="true">UB</span>
       </span>
       {!compact && <span>{appName}</span>}
     </Link>

@@ -78,30 +78,28 @@ export function HomePage() {
     <div className="page home-page">
       <div className="welcome-line">
         <div>
-          <span className="eyebrow">WELCOME TO YOUR NEXT CHAPTER</span>
-          <h1>A little ambition. A world of possibility.</h1>
+          <span className="eyebrow">CAREERS AT UBTI</span>
+          <h1>Good people. Meaningful work.</h1>
         </div>
-        <Link to="/hr/login" className="text-link">
-          Recruiting? Enter HR workspace
-          <ArrowUpRight size={14} />
-        </Link>
+        <span className="welcome-note">
+          <Globe2 size={15} /> Technology. People. Possibility.
+        </span>
       </div>
       <div className="home-top-grid">
         <section className="hero candidate-hero">
           <div className="hero-copy">
             <span className="hero-kicker">
               <span />
-              TALENT MEETS OPPORTUNITY
+              YOUR NEXT CHAPTER STARTS HERE
             </span>
             <h2>
-              Your next big move
+              Build what’s next.
               <br />
-              starts with a <span>match.</span>
+              Grow with <span>UBTI.</span>
             </h2>
             <p>
-              Discover meaningful work. Bring your whole experience.
-              <br className="desktop-only" /> Let the right opportunity find its
-              way to you.
+              Bring your ideas to a team shaping business through technology.
+              Discover a role where your experience can make a difference.
             </p>
             <Button variant="dark" asChild>
               <Link to="/jobs">
@@ -146,20 +144,31 @@ export function HomePage() {
           </div>
         </section>
         <section className="card opportunity-card">
-          <span className="eyebrow">MADE FOR YOUR NEXT MOVE</span>
-          <div className="opportunity-graphic" aria-hidden="true">
-            <span className="graphic-star">✦</span>
-            <span className="graphic-circle" />
-            <span className="graphic-small-star">✦</span>
-          </div>
-          <h2>
-            More than a resume.
-            <br />A story worth seeing.
-          </h2>
-          <p>
-            Your projects, skills, and experience help our team understand what
-            you bring.
-          </p>
+          <span className="eyebrow">A SIMPLE START</span>
+          <h2>Your next move,<br />one step at a time.</h2>
+          <ol className="application-steps">
+            <li>
+              <span>01</span>
+              <div>
+                <strong>Find your role</strong>
+                <p>Explore the work and the skills you can bring.</p>
+              </div>
+            </li>
+            <li>
+              <span>02</span>
+              <div>
+                <strong>Introduce yourself</strong>
+                <p>Sign in with LinkedIn and confirm your details.</p>
+              </div>
+            </li>
+            <li>
+              <span>03</span>
+              <div>
+                <strong>Share your experience</strong>
+                <p>Upload your resume for our team to review.</p>
+              </div>
+            </li>
+          </ol>
           <Button variant="secondary" asChild>
             <Link
               to={
@@ -277,10 +286,6 @@ export function HomePage() {
             You’re exploring a demo. Opportunities and sample evaluations are
             fictional.
           </span>
-          <Link to="/hr/login">
-            Try the HR experience
-            <ArrowRight size={14} />
-          </Link>
         </div>
       )}
     </div>
@@ -810,11 +815,9 @@ export function LoginPage({ hr = false }: { hr?: boolean }) {
           )
         )}
         <div className="login-footer-link">
-          {hr
-            ? "Looking for your next opportunity?"
-            : "Part of the recruitment team?"}
-          <Link to={hr ? "/login" : "/hr/login"}>
-            {hr ? "Candidate sign-in" : "HR sign-in"}
+          {hr ? "Looking for your next opportunity?" : "Find a role that fits your experience."}
+          <Link to={hr ? "/login" : "/jobs"}>
+            {hr ? "Candidate sign-in" : "Explore open roles"}
             <ArrowUpRight size={12} />
           </Link>
         </div>

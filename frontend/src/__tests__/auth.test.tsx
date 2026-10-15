@@ -7,7 +7,7 @@ import {Protected} from '../lib/auth';
 import {returnPath, signInHref} from '../lib/sign-in';
 import {AppShell} from '../components/app-shell';
 import type {AuthSession} from '../lib/types';
-import {LoginPage} from '../pages/candidate';
+import {HomePage, JobsPage, LoginPage} from '../pages/candidate';
 import {HRDashboardPage} from '../pages/hr';
 import {candidateUser, hrUser, session} from './fixtures';
 import {deferred, mockApi, renderRoutes} from './helpers';
@@ -17,6 +17,17 @@ beforeEach(mockApi);
 function LoginDestination() {const location = useLocation(); return <p>{location.pathname} · requested {location.state?.from}</p>;}
 
 describe('authentication and role boundaries', () => {
+  it.each(['/', '/jobs', '/login'])('keeps HR entry points out of public navigation and help at %s, including demo mode', async (path) => {
+    vi.mocked(api.session).mockResolvedValue(session(null));
+    renderRoutes(<Route element={<AppShell />}><Route path="/" element={<HomePage />} /><Route path="/jobs" element={<JobsPage />} /><Route path="/login" element={<LoginPage />} /></Route>, path);
+    expect(await screen.findByText('Demo workspace')).toBeVisible();
+    expect(screen.getAllByRole('link', {hidden: true}).filter(link => link.getAttribute('href')?.startsWith('/hr'))).toHaveLength(0);
+    await userEvent.click(screen.getByRole('button', {name: 'Privacy & support'}));
+    expect(await screen.findByRole('dialog')).toBeVisible();
+    expect(screen.queryByText('For recruitment teams')).not.toBeInTheDocument();
+    expect(screen.queryByText('HR sign-in')).not.toBeInTheDocument();
+  });
+
   it('redirects an anonymous application request to candidate login with its original destination', async () => {
     vi.mocked(api.session).mockResolvedValue(session(null));
     renderRoutes(<><Route path="/jobs/:id/apply" element={<Protected role="candidate"><p>Private application form</p></Protected>} /><Route path="/login" element={<LoginDestination />} /></>, '/jobs/TEST-ENG-001/apply');

@@ -11,7 +11,7 @@ import "./styles.css";
 import { AuthProvider } from "./lib/auth";
 import { App } from "./app";
 import { appName } from "./lib/config";
-document.title = `${appName} — Talent meets opportunity`;
+document.title = `${appName} — Build what’s next`;
 const client = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false },
