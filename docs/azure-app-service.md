@@ -2,6 +2,8 @@
 
 This guide uses `Dockerfile.azure`, `deploy/azure/` and `.github/workflows/azure-app-service.yml`. The existing local Docker Compose package remains separate and continues using HTTPS localhost port 7242. No Azure resources are automatically created or company repository pushed by adding these files.
 
+For company Azure Repos and Azure Pipelines while GitHub remains a temporary development mirror, use [the Azure DevOps guide](azure-devops.md). Its pipeline replaces the GitHub-specific repository, identity and deployment steps below; the container/runtime requirements remain the same.
+
 The Azure image contains Nginx/compiled React, FastAPI, **ARQ** and Redis under Supervisor. This project does not use Celery or SQL Server/ODBC, so those sample dependencies are not added. Browser requests use relative `/api/` and `/auth/` paths; no frontend API secret or build-time API hostname is needed.
 
 ```mermaid

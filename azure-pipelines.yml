@@ -1,0 +1,196 @@
+# Company Azure Repos pipeline. GitHub Actions does not execute this file.
+# Create the HRProcess-Azure-Config variable group before selecting this YAML.
+# The Azure Resource Manager service connection must be named HRProcess-Azure.
+# Start with AZURE_DEPLOY_ENABLED=false to publish an image before first setup.
+trigger:
+  batch: true
+  branches:
+    include: [main]
+
+# Azure Repos PR validation is configured through branch policies.
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: HRProcess-Azure-Config
+  - name: imageRepository
+    value: talentmatch-portal
+
+resources:
+  containers:
+    - container: testPostgres
+      image: postgres:17-alpine
+      env:
+        POSTGRES_USER: talentmatch
+        POSTGRES_PASSWORD: integration-test-only
+        POSTGRES_DB: talentmatch_test
+      ports: ['55432:5432']
+      options: >-
+        --health-cmd "pg_isready -U talentmatch -d talentmatch_test"
+        --health-interval 5s --health-timeout 3s --health-retries 10
+    - container: testRedis
+      image: redis:7.4-alpine
+      ports: ['6380:6379']
+      options: >-
+        --health-cmd "redis-cli ping"
+        --health-interval 5s --health-timeout 3s --health-retries 10
+
+stages:
+  - stage: Verify
+    displayName: Verify application
+    jobs:
+      - job: Checks
+        timeoutInMinutes: 30
+        services:
+          postgres: testPostgres
+          redis: testRedis
+        steps:
+          - checkout: self
+            clean: true
+            persistCredentials: false
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.12'
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '22.x'
+          - bash: python -m pip install uv==0.12.23
+            displayName: Install pinned uv
+          - bash: uv sync --frozen --extra dev --extra e2e
+            workingDirectory: backend
+            displayName: Install locked backend dependencies
+          - bash: npm ci --no-audit --no-fund
+            workingDirectory: frontend
+            displayName: Install locked frontend dependencies
+          - bash: bash scripts/check.sh
+            displayName: Check application, ERP bundle and tests
+            env:
+              REDIS_TEST_URL: redis://127.0.0.1:6380/15
+              POSTGRES_TEST_URL: postgresql://talentmatch:integration-test-only@127.0.0.1:55432/talentmatch_test
+          - bash: uv run --frozen --extra e2e playwright install --with-deps chromium
+            workingDirectory: backend
+            displayName: Install test browser
+          - bash: |
+              set -euo pipefail
+              export HR_USERNAME=browser-test-hr
+              export HR_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+              bash scripts/dev.sh >"$AGENT_TEMPDIRECTORY/talentmatch-dev.log" 2>&1 &
+              recruitment_dev_pid=$!
+              trap 'kill "$recruitment_dev_pid" 2>/dev/null || true' EXIT
+              for attempt in {1..30}; do
+                if curl --fail --silent http://127.0.0.1:8000/api/health >/dev/null; then break; fi
+                sleep 1
+              done
+              cd backend
+              uv run --frozen --extra e2e python ../scripts/smoke.py
+            displayName: Exercise fictional browser workflow
+
+  - stage: BuildPush
+    displayName: Build and publish Azure image
+    dependsOn: Verify
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: Build
+        timeoutInMinutes: 45
+        steps:
+          - checkout: self
+            clean: true
+            persistCredentials: false
+          - task: AzureCLI@2
+            name: buildImage
+            displayName: Build Dockerfile.azure and push to ACR
+            inputs:
+              azureSubscription: HRProcess-Azure
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az acr login --name "$ACR_NAME"
+                image="$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY:$IMAGE_TAG"
+                docker build --platform linux/amd64 --file Dockerfile.azure \
+                  --build-arg "BUILD_REVISION=$BUILD_REVISION" --tag "$image" .
+                docker push "$image"
+                digest="$(az acr repository show --name "$ACR_NAME" \
+                  --image "$IMAGE_REPOSITORY:$IMAGE_TAG" --query digest --output tsv)"
+                if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                  echo 'ACR did not return a valid image digest.' >&2
+                  exit 1
+                fi
+                image_reference="$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$digest"
+                echo "Published $image_reference"
+                echo "##vso[task.setvariable variable=imageReference;isOutput=true]$image_reference"
+            env:
+              ACR_NAME: $(AZURE_ACR_NAME)
+              ACR_LOGIN_SERVER: $(AZURE_ACR_LOGIN_SERVER)
+              IMAGE_REPOSITORY: $(imageRepository)
+              IMAGE_TAG: $(Build.BuildId)
+              BUILD_REVISION: $(Build.SourceVersion)
+
+  - stage: Deploy
+    displayName: Deploy to App Service
+    dependsOn: BuildPush
+    lockBehavior: sequential
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['AZURE_DEPLOY_ENABLED'], 'true'))
+    variables:
+      imageReference: $[ stageDependencies.BuildPush.Build.outputs['buildImage.imageReference'] ]
+    jobs:
+      - deployment: DeployApplication
+        timeoutInMinutes: 20
+        environment: hrprocess-production
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+                - task: AzureCLI@2
+                  displayName: Select the exact image and restart
+                  inputs:
+                    azureSubscription: HRProcess-Azure
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+                      az webapp config container set --resource-group "$RESOURCE_GROUP" \
+                        --name "$WEBAPP_NAME" --container-image-name "$IMAGE_REFERENCE" \
+                        --container-registry-url "https://$ACR_LOGIN_SERVER" --output none
+                      az webapp restart --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
+                  env:
+                    RESOURCE_GROUP: $(AZURE_RESOURCE_GROUP)
+                    WEBAPP_NAME: $(AZURE_WEBAPP_NAME)
+                    ACR_LOGIN_SERVER: $(AZURE_ACR_LOGIN_SERVER)
+                    IMAGE_REFERENCE: $(imageReference)
+                - bash: |
+                    set -euo pipefail
+                    python - <<'PY'
+                    import json
+                    import os
+                    import time
+                    import urllib.error
+                    import urllib.request
+                    from urllib.parse import urlsplit
+
+                    origin = os.environ['PUBLIC_APP_URL'].rstrip('/')
+                    parsed = urlsplit(origin)
+                    if (parsed.scheme != 'https' or not parsed.hostname or parsed.path or parsed.query
+                            or parsed.fragment or parsed.username or parsed.password or parsed.port not in (None, 443)):
+                        raise SystemExit('AZURE_PUBLIC_APP_URL must be the actual public HTTPS origin.')
+                    for attempt in range(40):
+                        try:
+                            with urllib.request.urlopen(origin + '/healthz', timeout=10) as response:
+                                result = json.load(response)
+                            if result.get('status') == 'ok' and result.get('revision') == os.environ['DEPLOY_REVISION']:
+                                print('Verified the new App Service revision.')
+                                break
+                        except (OSError, ValueError, urllib.error.URLError):
+                            pass
+                        print('Waiting for the new App Service revision, attempt', attempt + 1)
+                        time.sleep(15)
+                    else:
+                        raise SystemExit('The new revision did not become ready. Check App Service container logs.')
+                    PY
+                  displayName: Check readiness and deployed revision
+                  env:
+                    PUBLIC_APP_URL: $(AZURE_PUBLIC_APP_URL)
+                    DEPLOY_REVISION: $(Build.SourceVersion)

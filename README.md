@@ -14,6 +14,8 @@ https://localhost:7242/auth/linkedin/callback
 
 For hosted Azure deployment, use the separate [single-container ACR/App Service guide](docs/azure-app-service.md) and [IT resource request](docs/azure-it-request.md). `Dockerfile.azure` runs the web/API/ARQ/Redis processes in one non-root container. Azure uses the final public HTTPS hostname for LinkedIn; local Compose remains on port 7242. Company GitHub publishing is an explicit user step, and CI/CD stays disabled until company repository/identity variables are configured.
 
+For the temporary GitHub → local checkout → company Azure Repos workflow, follow [Azure DevOps setup and CI/CD](docs/azure-devops.md). The root `azure-pipelines.yml` verifies the application, publishes the Azure image to ACR and optionally deploys it through an Azure Resource Manager service connection.
+
 Docker Compose groups the HTTPS frontend gateway, API, worker and Redis under **talentmatch**. API/Redis ports are internal. After initial setup, Docker Desktop **Containers → talentmatch → Play** starts the existing group with one action.
 
 From the source repository in PowerShell:
