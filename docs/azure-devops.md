@@ -26,7 +26,7 @@ Use existing company resources where approved. Obtain their actual names and IDs
 | --- | --- |
 | Azure DevOps project | Azure Repos Git, Pipelines, permission to create a variable group, service connection and deployment environment |
 | ACR | Registry name and login server; image repository will be `talentmatch-portal` |
-| Linux App Service | Resource group, Web App name and exact public HTTPS hostname |
+| Linux App Service | Classic custom-container mode, resource group, Web App name and exact public HTTPS hostname |
 | Pipeline identity | Azure Resource Manager service connection using workload identity federation; registry `Reader` plus `AcrPush`, and `Website Contributor` scoped to this Web App |
 | Web App managed identity | `AcrPull` on ACR; `Key Vault Secrets User` on the approved vault when using Key Vault references |
 | Agent | Microsoft-hosted Ubuntu agent capacity, or a company Linux agent with Docker, Azure CLI and access to the required resources |
@@ -118,7 +118,7 @@ In App Service, configure the existing ACR image and managed-identity image pull
 
 Set **HTTPS Only**, **Always On**, health path `/healthz`, startup timeout 600 seconds, and **one instance**. This image embeds Redis; do not enable autoscale or run independent production slots with separate Redis instances.
 
-For classic custom-container App Service, set `WEBSITES_PORT=8080`. For sidecar-enabled App Service, configure the main container target port as **8080** instead; `WEBSITES_PORT` does not select its target port.
+This pipeline targets **classic custom-container App Service**; set `WEBSITES_PORT=8080`. If the existing Web App is sidecar-enabled, its main container target port must also be **8080**, but the deployment task must first be adapted to update that main container through `az webapp sitecontainers update`. The current `az webapp config container set` task targets classic configuration; changing the port alone does not adapt the deployment. Use classic mode for the supplied pipeline.
 
 Use [the application-settings template](../deploy/azure/appsettings.example.json) as the field checklist. Enter actual values in **App Service → Settings → Environment variables**, or use approved Key Vault references. Do not copy your local `.env` blindly. Set these Azure-specific values:
 
