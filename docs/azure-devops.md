@@ -1,196 +1,192 @@
-# Azure DevOps → ACR → App Service
+# ubticareers: Azure DevOps Server CI/CD
 
-Use personal GitHub temporarily as the source of changes, pull those commits locally, then push them to **Azure Repos Git**. Azure Pipelines builds the application, stores its image in Azure Container Registry (ACR), and deploys it to Linux App Service.
+The root [azure-pipelines.yml](../azure-pipelines.yml) automates company Azure Repos Git -> Azure Pipelines -> ACR -> the existing Linux App Service. Adding it does not create cloud resources, change the live application, or migrate databases. The personal GitHub repository remains a temporary development mirror; the company Azure Repos pipeline performs deployments.
 
-```text
-Personal GitHub → local Git checkout → company Azure Repos Git
-                                      ↓
-                               Azure Pipelines
-                                      ↓
-                               ACR image repository
-                                      ↓
-                               Linux App Service
-```
+The pipeline is prepared for a modern Azure DevOps Server installation with multi-stage YAML and deployment environments. Confirm the server version and available AzureCLI@2 task if your installation is older. Use the compatible agent download supplied by your own server.
 
-This guide uses the root [azure-pipelines.yml](../azure-pipelines.yml) and [Dockerfile.azure](../Dockerfile.azure). The single image runs React/Nginx, FastAPI, the ARQ worker, and Redis. The portable local Docker package remains separate. Complete the one-time Azure DevOps configuration below before the first real pipeline run; adding these files does not create or deploy company resources.
+## Existing resources
 
-**Before deployment:** Supabase migration is already complete; do not migrate it again. Azure production currently requires `DATABASE_SSLMODE=verify-full`. Your local `DATABASE_SSLMODE=require` setting will fail the Azure image's production startup checks. Configure the trusted database certificate chain before enabling deployment; instructions are below.
-
-The steps assume **Azure DevOps Services and a Git repository**, not TFVC. Older on-premises TFS/Azure DevOps Server may need a self-hosted agent and a different service-connection setup.
-
-## 1. Obtain the existing Azure resources and scoped access
-
-Use existing company resources where approved. Obtain their actual names and IDs:
-
-| Item | Required setup |
+| Item | Value |
 | --- | --- |
-| Azure DevOps project | Azure Repos Git, Pipelines, permission to create a variable group, service connection and deployment environment |
-| ACR | Registry name and login server; image repository will be `talentmatch-portal` |
-| Linux App Service | Classic custom-container mode, resource group, Web App name and exact public HTTPS hostname |
-| Pipeline identity | Azure Resource Manager service connection using workload identity federation; registry `Reader` plus `AcrPush`, and `Website Contributor` scoped to this Web App |
-| Web App managed identity | `AcrPull` on ACR; `Key Vault Secrets User` on the approved vault when using Key Vault references |
-| Agent | Microsoft-hosted Ubuntu agent capacity, or a company Linux agent with Docker, Azure CLI and access to the required resources |
+| Project URL | https://devops.ubtiinc.com/Solutions/HR-Process |
+| Agent registration collection URL | https://devops.ubtiinc.com/Solutions |
+| Proposed Git repository | ubticareers |
+| Subscription ID | 60730d88-4cfc-4e6d-8c19-3e9591bc14bd |
+| Subscription name | MSSponsor UIAP - Internal3 |
+| Resource group | ubti-hrprocess-rg |
+| ACR name | hrprocess |
+| ACR login server | hrprocess-h9fqfaa0d8h0dca3.azurecr.io |
+| ACR repository | ubticareers |
+| Existing Web App | ubtihrprocess |
+| Existing main sitecontainer | main |
+| Container port | 8080 |
+| Public origin | https://ubtihrprocess-egg3f7awbsbjdjd5.centralindia-01.azurewebsites.net |
 
-The ACR roles above assume ordinary registry RBAC. If ACR uses **RBAC Registry + ABAC Repository Permissions**, IT must assign the corresponding `Container Registry Repository Writer` to the pipeline identity and `Container Registry Repository Reader` to the Web App identity, with appropriate repository scope. Keep management-plane `Reader` for registry discovery. Legacy `AcrPush`/`AcrPull` are not the correct repository permissions in that mode.
+The current Web App is sidecar-enabled. This YAML updates its existing main container using `az webapp sitecontainers update`; it does not use classic `az webapp config container set` or convert the Web App to another mode.
 
-The developer does not need subscription Owner. IT can create the identities and role assignments. A private registry or private Web App requires an agent and App Service networking/DNS that can reach them; a public hosted agent cannot reach arbitrary private endpoints.
+## 1. Use the imported company Git repository
 
-## 2. Copy the committed code to an empty Azure Git repository
+The GitHub repository has already been imported into the HR-Process Azure DevOps project. Use that existing repository; do not import it again or replace its history. Confirm the main branch contains frontend, backend, Dockerfile.azure and azure-pipelines.yml.
 
-In Azure DevOps, create a private Git repository without an initial README or other commit. Copy its HTTPS clone URL from **Repos → Files → Clone**.
+Select Repos -> Files -> Clone and copy the exact HTTPS clone URL. If the repository is named ubticareers, the expected shape is `https://devops.ubtiinc.com/Solutions/HR-Process/_git/ubticareers`; use the actual URL displayed by the server, since the imported repository may have another name.
 
-From your existing Windows project folder:
+GitHub import copies the repository once. It does not continuously synchronize future GitHub commits and does not create an agent, Azure service connection or pipeline. Follow section 6 to push these CI/CD updates into the existing company repository.
 
-```powershell
-cd C:\Users\sritharoon.as\Documents\Projects\UB_HRProcess_Agent
-git pull --ff-only origin main
-git status --short
-git remote -v
-git remote add company "PASTE_THE_AZURE_DEVOPS_GIT_CLONE_URL"
-git push company main
-```
+## 2. Arrange an online Linux build agent
 
-Use the company-approved Git sign-in. If `company` already exists, inspect `git remote -v` and update it with `git remote set-url company "EXACT_CLONE_URL"` if necessary.
+This company URL appears to be Azure DevOps Server. Microsoft-hosted agents such as `ubuntu-latest` are not available on on-premises Azure DevOps Server. Open Project settings -> Agent pools and prefer an existing approved online Linux agent. Replace the YAML pool name `ubticareers-linux` if using another existing pool.
 
-`origin` remains personal GitHub; `company` points to Azure DevOps. Omit `-u` so your local `main` continues tracking personal GitHub. Only committed files move: `.env`, local certificates, databases and exported image archives must remain untracked. If the company repository already contains commits, import through its approved branch/PR process; do not force-push or use `--mirror`.
+If there is no Linux agent, a pool administrator/IT must create or authorize the pool and register an agent on an approved Linux x64 machine. ACR and App Service do not provide this agent. Do not register it inside the production application container.
 
-The existing `.github/workflows/` files may remain in the repository, but Azure DevOps does not execute them. Keep GitHub's `AZURE_DEPLOY_ENABLED` deployment gate unset or `false` so Azure Pipelines is the only Azure deployer.
+The agent needs:
 
-## 3. Create the Azure service connection and production environment
+- A server-compatible Azure Pipelines agent, configured to run as a service.
+- Git, Bash, curl, Python 3.12 (`python3.12` on PATH), Node.js 22 with npm, and uv 0.12.23.
+- Docker Engine with BuildKit/buildx and daemon access for the agent service account.
+- Current Azure CLI supporting `az webapp sitecontainers update`.
+- Playwright Chromium system libraries. The pipeline downloads the browser as the agent user; install the OS libraries once using the installed Playwright CLI and an approved administrator account.
+- Network access to the company DevOps collection, Microsoft Entra/Azure management, ACR, package registries, container base-image registries, Playwright browser downloads, and the public Web App health endpoint.
+- Available local ports 8000 and 5173 for the fictional browser test. PostgreSQL and Redis test-container host ports are allocated dynamically.
 
-In **Project settings → Service connections → New service connection**:
+Use Project settings -> Agent pools -> selected pool -> New agent -> Linux. Follow that server's download/extraction instructions. In the agent directory, run `./config.sh` and enter `https://devops.ubtiinc.com/Solutions` as the server/collection URL, the approved authentication method, and the selected pool. Enter a registration PAT only at the secure prompt, if your company uses PAT registration; never add it to YAML or Git. Registration requires the relevant pool-management permission.
 
-1. Select **Azure Resource Manager**.
-2. Use **workload identity federation** and the company-approved application or managed identity.
-3. Select the approved subscription/resource group and name the connection exactly `HRProcess-Azure`, matching the YAML's service-connection inputs.
-4. Have IT assign the scoped permissions in step 1 to this connection's identity.
-5. Authorize this pipeline to use the connection. Do not enable access for unrelated pipelines.
+For an approved Linux service setup, the usual commands after registration are `sudo ./svc.sh install` and `sudo ./svc.sh start`. Confirm the agent appears Online. Restart the agent service after installing new tools so it inherits the updated PATH. Use one agent per machine initially to avoid browser-test port conflicts.
 
-Federation uses short-lived authentication; no Azure client secret or ACR admin password is needed in the YAML. If you cannot create the federated identity, IT can provide the service connection.
+After the backend dependencies are installed, IT can install browser OS libraries once with the equivalent of `sudo /ABSOLUTE/CHECKOUT/backend/.venv/bin/python -m playwright install-deps chromium`. This is an agent preparation step, not a command to run inside the live application.
 
-In **Pipelines → Environments**, create `hrprocess-production`. Apply the company's existing deployment checks if required. An exclusive lock can serialize deployments; the YAML uses sequential lock behavior. The pipeline uses this exact environment name.
+## 3. Create or reuse the Azure Resource Manager service connection
 
-## 4. Create the pipeline variable group
+Open Project settings -> Service connections -> New service connection -> Azure Resource Manager. Name it `ubticareers-azure`, or substitute an existing approved connection name at both AzureCLI@2 inputs in the YAML.
 
-Go to **Pipelines → Library → + Variable group**. Name it exactly:
+For Azure DevOps Server, Microsoft's documented method is Service principal (manual), using a company-approved deployment application/service principal and its credential. Reuse an existing approved connection if available. Workload identity federation guidance for Azure DevOps Services should not be assumed to apply to this server. If the installed server supports a company-approved secretless method, IT can supply that connection instead.
 
-```text
-HRProcess-Azure-Config
-```
+Set Azure Cloud and the subscription ID/name listed above. Select the resource group if offered, and enter the deployment identity's client/application ID, tenant ID, and approved credential. IT must supply or configure these because the user was not granted Entra app-registration administration. A D365 application credential is not automatically an Azure deployment identity. Keep a deployment secret only in the service connection, not YAML, variable groups, Docker build arguments, or the application .env.
 
-Add these non-secret values and authorize the pipeline to use the group:
+The connection's identity needs these scoped roles:
+
+| Resource | Role |
+| --- | --- |
+| ACR hrprocess | Reader plus AcrPush |
+| App Service ubtihrprocess | Website Contributor |
+
+These ACR roles assume classic registry RBAC; ABAC-enabled registries require the corresponding repository permissions. The identity does not need subscription Owner or resource-group Contributor. Selecting a subscription in the service-connection form does not itself grant subscription-wide access. An optional subscription Reader assignment may be required by the company's connection-discovery/verification process; have IT use its supported method.
+
+Verify and save. Authorize only this pipeline to use the connection. The Web App's image-pull managed identity is separate and keeps its existing AcrPull permission; granting AcrPush to your personal account does not grant it to the pipeline.
+
+## 4. Create the variable group
+
+Go to Pipelines -> Library -> + Variable group. Name it `ubticareers-azure-config` and enter:
 
 | Variable | Value |
 | --- | --- |
-| `AZURE_ACR_NAME` | Registry resource name, without `.azurecr.io` |
-| `AZURE_ACR_LOGIN_SERVER` | Exact login server returned by ACR, without `https://` |
-| `AZURE_RESOURCE_GROUP` | Web App resource group |
-| `AZURE_WEBAPP_NAME` | Existing Linux Web App resource name |
-| `AZURE_PUBLIC_APP_URL` | Actual public HTTPS origin, e.g. `https://ACTUAL_HOST`; no path or `:7242` |
-| `AZURE_DEPLOY_ENABLED` | `false` initially |
+| AZURE_ACR_NAME | hrprocess |
+| AZURE_ACR_LOGIN_SERVER | hrprocess-h9fqfaa0d8h0dca3.azurecr.io |
+| AZURE_RESOURCE_GROUP | ubti-hrprocess-rg |
+| AZURE_WEBAPP_NAME | ubtihrprocess |
+| AZURE_PUBLIC_APP_URL | https://ubtihrprocess-egg3f7awbsbjdjd5.centralindia-01.azurewebsites.net |
+| AZURE_DEPLOY_ENABLED | false |
 
-Use the actual Azure hostname; newer App Service hostnames can contain generated suffixes. Runtime credentials belong in App Service/Key Vault, not this variable group or Docker build arguments.
+Authorize this pipeline to use the group. These are resource settings, not runtime secrets. Keep the working database, D365, LinkedIn, HR, Blob and AI credentials in App Service settings.
 
-## 5. Run the first image build without deploying
+## 5. Create the deployment environment
 
-In **Pipelines → New pipeline**:
+Go to Pipelines -> Environments -> New environment. Name it `ubticareers-production` and choose no additional resource (None). The AzureCLI task deploys to the already-existing Web App; this environment tracks deployments and any checks.
 
-1. Choose **Azure Repos Git** and the company repository.
-2. Choose **Existing Azure Pipelines YAML file**.
-3. Select branch `main` and path `/azure-pipelines.yml`.
-4. Run the pipeline and approve its resource authorizations if requested.
+Authorize the pipeline. Configure any required company approval and exclusive-lock checks if available and required by policy. Environments do not themselves create a Web App, change permissions, or deploy a container. If this menu/YAML feature is unavailable, confirm the Azure DevOps Server version before selecting the YAML.
 
-The three stages are **Verify → BuildPush → Deploy**. Verify runs the existing application checks with test Redis/PostgreSQL and a demo browser flow. BuildPush runs only after verification succeeds on branch `main`; feature/PR validation does not publish images. Deploy also requires `AZURE_DEPLOY_ENABLED=true` and any company-configured production checks.
+## 6. Pull these updates and push them to the existing company repository
 
-For this first run, keep `AZURE_DEPLOY_ENABLED=false`: verification and image publishing run while deployment stays disabled. BuildPush builds `Dockerfile.azure` for Linux/amd64 and pushes:
+The root azure-pipelines.yml now uses the ubticareers image repository, a self-hosted Linux pool, the company service connection, and the existing main sitecontainer. Pull the latest personal GitHub commit locally before updating Azure Repos. The older pipeline from the initial import used a hosted agent and classic container deployment.
 
-```text
-YOUR_ACR_LOGIN_SERVER/talentmatch-portal:BUILD_ID
-```
+Review local changes and the remote URLs. Keep .env, private keys, SQLite files, uploaded resumes and private connection settings untracked. The public Supabase CA remains in App Service persistent storage; CI's local PostgreSQL test container does not require it.
 
-The tag is the Azure Pipelines run's `Build.BuildId`; the image also records `Build.SourceVersion` as its revision. Find the tag in **ACR → Repositories → talentmatch-portal**. No portable ZIP, `images.tar`, or local Docker upload is needed for this route.
-
-If Microsoft-hosted agent capacity is unavailable for the organization, IT must enable it or supply an approved self-hosted Linux pool and update the YAML's pool configuration.
-
-## 6. Configure the Linux Web App once
-
-In App Service, configure the existing ACR image and managed-identity image pulls. Keep the image startup command empty: its entrypoint starts all four services.
-
-Set **HTTPS Only**, **Always On**, health path `/healthz`, startup timeout 600 seconds, and **one instance**. This image embeds Redis; do not enable autoscale or run independent production slots with separate Redis instances.
-
-This pipeline targets **classic custom-container App Service**; set `WEBSITES_PORT=8080`. If the existing Web App is sidecar-enabled, its main container target port must also be **8080**, but the deployment task must first be adapted to update that main container through `az webapp sitecontainers update`. The current `az webapp config container set` task targets classic configuration; changing the port alone does not adapt the deployment. Use classic mode for the supplied pipeline.
-
-Use [the application-settings template](../deploy/azure/appsettings.example.json) as the field checklist. Enter actual values in **App Service → Settings → Environment variables**, or use approved Key Vault references. Do not copy your local `.env` blindly. Set these Azure-specific values:
-
-```dotenv
-APP_ENV=production
-DEMO_MODE=false
-FRONTEND_BASE_URL=https://ACTUAL_PUBLIC_HOST
-BACKEND_BASE_URL=https://ACTUAL_PUBLIC_HOST
-CORS_ALLOWED_ORIGINS=["https://ACTUAL_PUBLIC_HOST"]
-LINKEDIN_REDIRECT_URI=https://ACTUAL_PUBLIC_HOST/auth/linkedin/callback
-METADATA_BACKEND=postgres
-DATABASE_SSLMODE=verify-full
-DATABASE_SSLROOTCERT=
-D365_CONTRACT_MODE=sqlite
-REDIS_URL=redis://127.0.0.1:6379/0
-REDIS_PREFIX=talentmatch-production
-WEBSITES_PORT=8080
-WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
-WEBSITES_CONTAINER_START_TIME_LIMIT=600
-WEBSITE_WARMUP_PATH=/healthz
-WEBSITE_WARMUP_STATUSES=200
-```
-
-Keep the working Supabase `DATABASE_URL`, D365 integration settings and three service paths, Azure OpenAI deployment/settings, private Blob settings, LinkedIn credentials, and HR username/password. Use secure App Service settings or Key Vault references for their secrets. `D365_CONTRACT_MODE=sqlite` still selects the lean ERP contract; the metadata engine is PostgreSQL.
-
-For database TLS, a blank `DATABASE_SSLROOTCERT` uses the container's system trust. If Supabase's endpoint needs an additional CA, provide its trusted public CA certificate at a readable **Linux runtime path**, then set `DATABASE_SSLROOTCERT` to that path. A Windows path such as `C:\...` or your local `.local` file does not exist in the image. Use the approved App Service mount/configuration mechanism. The certificate is trust material, not a private key. Complete this before enabling deployment; the production preflight rejects `DATABASE_SSLMODE=require`.
-
-The browser uses the same public host for frontend and API requests; no `VITE_API_BASE_URL` or frontend database credential is required. Azure handles public HTTPS on **443**, then forwards internally to Nginx on **8080**. Do not upload local mkcert certificates to this Azure image.
-
-Supabase already contains your migrated records. Keep the same private Blob account/container to retain resume access. Neither ERP records nor resumes are inside the Docker image.
-
-## 7. Register the callback and enable deployment
-
-After the final Azure hostname/domain and HTTPS are ready, register this exact authorized redirect URL in the LinkedIn developer application:
-
-```text
-https://ACTUAL_PUBLIC_HOST/auth/linkedin/callback
-```
-
-It must match `LINKEDIN_REDIRECT_URI` in App Service. There is no `:7242` suffix in Azure. Local Docker can keep its separate `https://localhost:7242/auth/linkedin/callback` configuration where permitted by your LinkedIn application setup.
-
-Before cutover, stop the old native/local Docker backend and worker that use the same Supabase dataset. Then:
-
-1. Change `AZURE_DEPLOY_ENABLED` to `true` in `HRProcess-Azure-Config` and save.
-2. Run the pipeline on `main` again.
-3. Approve `hrprocess-production` deployment if configured.
-4. Wait for build, image push, deploy and revision/readiness verification to finish.
-
-Changing a variable group does not start a pipeline automatically. An image push alone does not update the Web App; the deployment stage does that. Later `main` pushes trigger the pipeline automatically.
-
-Open the public application and `/hr` directly. Confirm `/healthz` returns `status: ok` and the deployed Git revision. Then verify LinkedIn returns to the selected job, an application reaches D365, a resume remains accessible to authorized HR, and AI results save to `UBHRMatchEvaluationTable`. The health endpoint checks internal readiness; it does not validate every external credential or workflow.
-
-## 8. Daily GitHub → local → Azure DevOps workflow
-
-While personal GitHub remains the temporary source of changes, after a GitHub update run:
+From PowerShell:
 
 ```powershell
 cd C:\Users\sritharoon.as\Documents\Projects\UB_HRProcess_Agent
+git status --short
+git switch main
+git pull --ff-only origin main
+git remote -v
+git remote add company "PASTE_THE_EXACT_HTTPS_CLONE_URL_FROM_AZURE_DEVOPS"
+git fetch company
+git push company main
+```
+
+If company already exists, inspect its URL instead of adding it again. Use `git remote set-url company "EXACT_CLONE_URL"` only if the configured URL is incorrect. The company repository was imported from GitHub, so these updates can be pushed normally when the histories remain aligned. If the company repository has additional commits or main is protected, synchronize through an approved branch/PR instead of force-pushing. If a fast-forward pull or push is rejected, reconcile the histories before proceeding.
+
+GitHub remains the temporary development mirror. Keep company-created pipeline edits and merge commits synchronized back to it while using this arrangement. Once Azure Repos becomes canonical, use the company's normal branch/PR workflow.
+
+## 7. Create the pipeline and run the first build without deployment
+
+Go to Pipelines -> New pipeline -> Azure Repos Git -> your existing imported repository -> Existing Azure Pipelines YAML file -> branch main -> `/azure-pipelines.yml`. Name the pipeline `ubticareers-ci-cd`. Authorize the pool, variable group, service connection, and deployment environment when prompted, using the relevant administrator if permission is missing.
+
+Keep AZURE_DEPLOY_ENABLED=false. Run on main.
+
+The stages are:
+
+1. Verify: locked dependencies, Python/frontend checks, ERP bundle validation, tests against local Redis/PostgreSQL containers, frontend build, and the existing fictional browser smoke workflow. No production AI, D365, Supabase, or LinkedIn credentials are required for these tests.
+2. BuildPush: build Dockerfile.azure, embed the commit revision, push `hrprocess-h9fqfaa0d8h0dca3.azurecr.io/ubticareers:BUILD_ID`, and resolve the immutable image digest.
+3. Deploy: skipped while deployment is disabled.
+
+Confirm ACR -> Repositories -> ubticareers contains the new numeric tag. The running phase1-v1 image is not changed by this first build. A pipeline run must actually pass before its configuration can be considered verified.
+
+## 8. Enable deployment
+
+Keep all working runtime settings unchanged, including:
+
+```dotenv
+WEBSITES_ENABLE_APP_SERVICE_STORAGE=true
+DATABASE_SSLMODE=verify-full
+DATABASE_SSLROOTCERT=/home/certs/supabase-ca.crt
+```
+
+Preserve the uploaded `/home/certs/supabase-ca.crt` and the existing India Supabase DATABASE_URL. Do not repeat the migration. This YAML never uploads app settings, reads secrets, or replaces /home. The existing main container's authentication is preserved; the image and target port are updated and its blank startup command is retained.
+
+Once the first run passes, set AZURE_DEPLOY_ENABLED=true in the variable group. Save and run the pipeline again on main. A variable-group edit does not trigger a run by itself.
+
+The deployment updates the existing main sitecontainer to the exact published digest, restarts the Web App, and polls /healthz until both `status=ok` and `revision=Build.SourceVersion`. One App Service instance is retained because Redis is embedded. Deployments involve a brief restart and sessions may need a fresh login.
+
+Open the public site and /hr after deployment. A passing readiness check verifies internal startup, not the external business integrations. LinkedIn callback registration remains separate, and the GPT-5.4-mini client compatibility update has not been implemented by this CI/CD configuration.
+
+## 9. Configure PR validation and choose the daily source workflow
+
+After the first run works, go to Repos -> Branches -> main -> Branch policies. Configure required reviewers and Build validation using this pipeline. Azure Repos PR validation is a branch-policy setting; `pr: none` in YAML avoids assuming GitHub PR triggers. A PR validation build runs verification without publishing or deploying because its source branch is not refs/heads/main.
+
+When direct main pushes are permitted during the temporary mirror phase, updates can follow:
+
+```powershell
+git switch main
 git pull --ff-only origin main
 git push company main
 ```
 
-The Azure DevOps `main` push starts the pipeline. Commit `azure-pipelines.yml` changes through this same route; selecting **Existing YAML** avoids generating a separate company-only pipeline commit.
+After main is protected, use company feature branches and PRs instead of bypassing the policy. Prefer making Azure Repos the canonical repository at that point. If personal GitHub must remain a mirror, include company-created merge/squash commits when syncing back; do not use the two-command fast-forward workflow blindly after histories diverge and do not force-push. Azure DevOps runs the YAML; the .github workflow directory does not run on Azure Repos. Keep GitHub deployment disabled so there is only one deployment pipeline.
 
-If company `main` requires PRs, push the corresponding GitHub feature branch to `company` and open an Azure Repos PR instead of bypassing branch protection. Merge/squash commits created by Azure DevOps can make the two `main` branches diverge. Sync those company commits back into personal GitHub through the approved review process before resuming the two-command flow. If a push is rejected or `--ff-only` fails, stop and reconcile the branches; do not force-push.
+## 10. Troubleshooting and rollback
 
-Once the company repository becomes the sole source, retire this temporary two-repository workflow and make normal company branches/PRs there.
+| Symptom | Next check |
+| --- | --- |
+| Waiting for agent | Pool name, Online agent, authorization and parallel-job capacity on the company server |
+| YAML/task/environment unsupported | Installed Azure DevOps Server version and available task versions |
+| Service connection not found/authorized | Exact ubticareers-azure name and pipeline-use permission |
+| npm/uv/browser downloads fail | Agent network/trust configuration and disk space; preserve TLS verification |
+| Browser launch reports missing libraries | Install Playwright OS dependencies on the agent, then rerun |
+| ACR push denied | Pipeline service connection identity's AcrPush/repository-writer permission |
+| Container update denied | Website Contributor on ubtihrprocess for the pipeline identity |
+| App Service image pull denied | App Service managed identity's separate AcrPull/repository-reader permission and main-container authentication |
+| Database TLS failure | Persistent CA path, uploaded file and verify-full settings; leave persistent storage enabled |
+| Readiness returns the previous revision | Wait for image pull/startup; inspect the main container image/digest and fresh runtime logs |
+| Readiness succeeds, AI fails | Check the application model-client integration separately; CI does not add the pending GPT-5.4-mini update |
 
-## 9. Logs and rollback
+Retain known-good image tags/digests. For rollback, first set AZURE_DEPLOY_ENABLED=false to stop subsequent automatic deployments, then select the previous verified image on App Service -> Deployment Center -> Containers -> main, Apply, and restart. Already-running deployments need to be stopped separately if applicable. Verify /healthz again. An image rollback does not revert Supabase, Blob or D365 data.
 
-Use **Azure Pipelines → Run → Job logs** for build/deploy failures and **App Service → Log stream** for runtime stage logs. If runtime fails immediately, check resolved Key Vault references, actual public URLs, database TLS settings and container target port before changing application code.
+## Official references
 
-Retain previous verified ACR image tags. For rollback, select a previous verified image in App Service's container configuration and restart; verify its `/healthz` revision. An image rollback does not roll back Supabase, Blob or D365 data. Disable automatic deployment temporarily while investigating.
+- Azure DevOps Server and hosted-agent limitation: https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/hosted
+- Linux self-hosted agent: https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/linux-agent
+- Azure Resource Manager service connections (select your Server version): https://learn.microsoft.com/en-us/azure/devops/pipelines/library/connect-to-azure
+- Sidecar App Service configuration: https://learn.microsoft.com/en-us/azure/app-service/configure-sidecar
+- Sitecontainer CLI commands: https://learn.microsoft.com/en-us/cli/azure/webapp/sitecontainers
 
-For more runtime details, use [the Azure App Service guide](azure-app-service.md), sections 3, 5 and 10–11. Its GitHub Actions setup sections describe the alternate GitHub deployment route; this guide replaces those sections with Azure Pipelines.
+The agent, service-connection and sidecar guidance was checked against Microsoft's official documentation/source. The pipeline YAML and shell/Python syntax are checked separately; it has not been executed on the company's server or deployed with company credentials.

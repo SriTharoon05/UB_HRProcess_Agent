@@ -1,48 +1,42 @@
-# Company Azure Repos pipeline. GitHub Actions does not execute this file.
-# Create the HRProcess-Azure-Config variable group before selecting this YAML.
-# The Azure Resource Manager service connection must be named HRProcess-Azure.
-# Start with AZURE_DEPLOY_ENABLED=false to publish an image before first setup.
+# Prepared for Azure DevOps Server and the existing sidecar-enabled Web App.
+# Required: Linux pool ubticareers-linux, ARM connection ubticareers-azure,
+# variable group ubticareers-azure-config, environment ubticareers-production.
+# Substitute existing approved company names when needed.
+# Keep AZURE_DEPLOY_ENABLED=false for the first run.
+name: ubticareers-$(Date:yyyyMMdd).$(Rev:r)
 trigger:
   batch: true
   branches:
     include: [main]
-
-# Azure Repos PR validation is configured through branch policies.
 pr: none
-
 pool:
-  vmImage: ubuntu-latest
-
+  name: ubticareers-linux
+  demands:
+    - Agent.OS -equals Linux
 variables:
-  - group: HRProcess-Azure-Config
+  - group: ubticareers-azure-config
   - name: imageRepository
-    value: talentmatch-portal
-
+    value: ubticareers
 resources:
   containers:
     - container: testPostgres
       image: postgres:17-alpine
       env:
-        POSTGRES_USER: talentmatch
+        POSTGRES_USER: ubticareers
         POSTGRES_PASSWORD: integration-test-only
-        POSTGRES_DB: talentmatch_test
-      ports: ['55432:5432']
-      options: >-
-        --health-cmd "pg_isready -U talentmatch -d talentmatch_test"
-        --health-interval 5s --health-timeout 3s --health-retries 10
+        POSTGRES_DB: ubticareers_test
+      ports: ['5432']
+      options: --health-cmd "pg_isready -U ubticareers -d ubticareers_test" --health-interval 5s --health-timeout 3s --health-retries 10
     - container: testRedis
       image: redis:7.4-alpine
-      ports: ['6380:6379']
-      options: >-
-        --health-cmd "redis-cli ping"
-        --health-interval 5s --health-timeout 3s --health-retries 10
-
+      ports: ['6379']
+      options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
 stages:
   - stage: Verify
     displayName: Verify application
     jobs:
       - job: Checks
-        timeoutInMinutes: 30
+        timeoutInMinutes: 45
         services:
           postgres: testPostgres
           redis: testRedis
@@ -50,15 +44,23 @@ stages:
           - checkout: self
             clean: true
             persistCredentials: false
-          - task: UsePythonVersion@0
-            inputs:
-              versionSpec: '3.12'
-          - task: NodeTool@0
-            inputs:
-              versionSpec: '22.x'
-          - bash: python -m pip install uv==0.12.23
-            displayName: Install pinned uv
-          - bash: uv sync --frozen --extra dev --extra e2e
+          - bash: |
+              set -euo pipefail
+              python3.12 --version
+              node --version
+              node -e 'if (Number(process.versions.node.split(".")[0]) !== 22) process.exit(1)'
+              uv --version
+              if [[ "$(uv --version | awk '{print $2}')" != '0.12.23' ]]; then
+                echo 'Install the pinned uv version 0.12.23 on this agent.' >&2
+                exit 1
+              fi
+              docker info >/dev/null
+              docker buildx version
+              az version
+              az webapp sitecontainers update --help >/dev/null
+              curl --version
+            displayName: Check company Linux agent tools
+          - bash: uv sync --frozen --python python3.12 --extra dev --extra e2e
             workingDirectory: backend
             displayName: Install locked backend dependencies
           - bash: npm ci --no-audit --no-fund
@@ -67,26 +69,42 @@ stages:
           - bash: bash scripts/check.sh
             displayName: Check application, ERP bundle and tests
             env:
-              REDIS_TEST_URL: redis://127.0.0.1:6380/15
-              POSTGRES_TEST_URL: postgresql://talentmatch:integration-test-only@127.0.0.1:55432/talentmatch_test
-          - bash: uv run --frozen --extra e2e playwright install --with-deps chromium
+              REDIS_TEST_URL: redis://127.0.0.1:$(agent.services.redis.ports.6379)/15
+              POSTGRES_TEST_URL: postgresql://ubticareers:integration-test-only@127.0.0.1:$(agent.services.postgres.ports.5432)/ubticareers_test
+          - bash: uv run --frozen --extra e2e playwright install chromium
             workingDirectory: backend
             displayName: Install test browser
           - bash: |
               set -euo pipefail
               export HR_USERNAME=browser-test-hr
-              export HR_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
-              bash scripts/dev.sh >"$AGENT_TEMPDIRECTORY/talentmatch-dev.log" 2>&1 &
+              export HR_PASSWORD="$(python3.12 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+              export APP_ENV=development
+              export DEMO_MODE=true
+              export FRONTEND_BASE_URL=http://127.0.0.1:5173
+              export BACKEND_BASE_URL=http://127.0.0.1:8000
+              export CORS_ALLOWED_ORIGINS='["http://127.0.0.1:5173"]'
+              export METADATA_BACKEND=sqlite
+              export AZURE_STORAGE_CONNECTION_STRING=
+              export LOCAL_RESUME_DIR="$AGENT_TEMPDIRECTORY/ubticareers-browser-resumes"
+              bash scripts/dev.sh >"$AGENT_TEMPDIRECTORY/ubticareers-dev.log" 2>&1 &
               recruitment_dev_pid=$!
-              trap 'kill "$recruitment_dev_pid" 2>/dev/null || true' EXIT
-              for attempt in {1..30}; do
-                if curl --fail --silent http://127.0.0.1:8000/api/health >/dev/null; then break; fi
+              trap 'kill "$recruitment_dev_pid" 2>/dev/null || true; wait "$recruitment_dev_pid" 2>/dev/null || true' EXIT
+              browser_ready=false
+              for attempt in {1..90}; do
+                if curl --fail --silent --max-time 2 http://127.0.0.1:8000/api/health >/dev/null \
+                    && curl --fail --silent --max-time 2 http://127.0.0.1:5173/ >/dev/null; then
+                  browser_ready=true
+                  break
+                fi
                 sleep 1
               done
+              if [[ "$browser_ready" != true ]]; then
+                tail -n 100 "$AGENT_TEMPDIRECTORY/ubticareers-dev.log"
+                exit 1
+              fi
               cd backend
               uv run --frozen --extra e2e python ../scripts/smoke.py
             displayName: Exercise fictional browser workflow
-
   - stage: BuildPush
     displayName: Build and publish Azure image
     dependsOn: Verify
@@ -102,11 +120,13 @@ stages:
             name: buildImage
             displayName: Build Dockerfile.azure and push to ACR
             inputs:
-              azureSubscription: HRProcess-Azure
+              azureSubscription: ubticareers-azure
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
                 set -euo pipefail
+                export DOCKER_CONFIG="$(mktemp -d)"
+                trap 'rm -rf "$DOCKER_CONFIG"' EXIT
                 az acr login --name "$ACR_NAME"
                 image="$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY:$IMAGE_TAG"
                 docker build --platform linux/amd64 --file Dockerfile.azure \
@@ -127,7 +147,6 @@ stages:
               IMAGE_REPOSITORY: $(imageRepository)
               IMAGE_TAG: $(Build.BuildId)
               BUILD_REVISION: $(Build.SourceVersion)
-
   - stage: Deploy
     displayName: Deploy to App Service
     dependsOn: BuildPush
@@ -137,33 +156,38 @@ stages:
       imageReference: $[ stageDependencies.BuildPush.Build.outputs['buildImage.imageReference'] ]
     jobs:
       - deployment: DeployApplication
-        timeoutInMinutes: 20
-        environment: hrprocess-production
+        timeoutInMinutes: 25
+        environment: ubticareers-production
         strategy:
           runOnce:
             deploy:
               steps:
                 - checkout: none
                 - task: AzureCLI@2
-                  displayName: Select the exact image and restart
+                  displayName: Update the existing main container and restart
                   inputs:
-                    azureSubscription: HRProcess-Azure
+                    azureSubscription: ubticareers-azure
                     scriptType: bash
                     scriptLocation: inlineScript
                     inlineScript: |
                       set -euo pipefail
-                      az webapp config container set --resource-group "$RESOURCE_GROUP" \
-                        --name "$WEBAPP_NAME" --container-image-name "$IMAGE_REFERENCE" \
-                        --container-registry-url "https://$ACR_LOGIN_SERVER" --output none
-                      az webapp restart --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
+                      mode="$(az webapp config show --resource-group "$RESOURCE_GROUP" \
+                        --name "$WEBAPP_NAME" --query linuxFxVersion --output tsv)"
+                      if [[ "${mode,,}" != 'sitecontainers' ]]; then
+                        echo 'Expected the existing sidecar-enabled App Service. No configuration was changed.' >&2
+                        exit 1
+                      fi
+                      az webapp sitecontainers update --resource-group "$RESOURCE_GROUP" \
+                        --name "$WEBAPP_NAME" --container-name main \
+                        --image "$IMAGE_REFERENCE" --target-port 8080 --output none
+                      az webapp restart --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME" --output none
                   env:
                     RESOURCE_GROUP: $(AZURE_RESOURCE_GROUP)
                     WEBAPP_NAME: $(AZURE_WEBAPP_NAME)
-                    ACR_LOGIN_SERVER: $(AZURE_ACR_LOGIN_SERVER)
                     IMAGE_REFERENCE: $(imageReference)
                 - bash: |
                     set -euo pipefail
-                    python - <<'PY'
+                    python3.12 - <<'PY'
                     import json
                     import os
                     import time
